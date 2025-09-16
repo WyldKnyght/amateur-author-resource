@@ -1,3 +1,4 @@
+# backend/app/api/auth.py
 from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
 from sqlmodel import Session, select
 from app.core.database import get_session

@@ -1,0 +1,10 @@
+<AuthContext.Provider value={{
+  user,
+  isAuthenticated: !!user,
+  login,
+  register,
+  logout,
+  isLoading,
+}}>
+  {children}
+</AuthContext.Provider>
