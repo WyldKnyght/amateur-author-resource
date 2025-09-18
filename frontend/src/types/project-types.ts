@@ -123,7 +123,7 @@ export interface ProjectEditorState {
   hasUnsavedChanges: boolean;
   lastSaved?: string;
   error?: string;
-  content: string;
+  content: StoryContent | null;
 }
 
 export interface ProjectListState {

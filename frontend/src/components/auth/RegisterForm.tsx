@@ -1,6 +1,8 @@
+// frontend/src/components/auth/RegisterForm.tsx
 import React, { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Link, useNavigate } from 'react-router-dom';
+import ErrorMessage from '../common/ErrorMessage';
 
 const RegisterForm: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -20,12 +22,10 @@ const RegisterForm: React.FC = () => {
       setError('Passwords do not match');
       return;
     }
-
     if (password.length < 8) {
       setError('Password must be at least 8 characters long');
       return;
     }
-
     setIsLoading(true);
 
     try {
@@ -57,7 +57,7 @@ const RegisterForm: React.FC = () => {
               type="text"
               placeholder="Choose a username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={e => setUsername(e.target.value)}
               required
               minLength={3}
               maxLength={50}
@@ -71,7 +71,7 @@ const RegisterForm: React.FC = () => {
               type="email"
               placeholder="Enter your email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={e => setEmail(e.target.value)}
               required
               disabled={isLoading}
             />
@@ -83,7 +83,7 @@ const RegisterForm: React.FC = () => {
               type="password"
               placeholder="Create a password (8+ characters)"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={e => setPassword(e.target.value)}
               required
               minLength={8}
               disabled={isLoading}
@@ -96,12 +96,12 @@ const RegisterForm: React.FC = () => {
               type="password"
               placeholder="Confirm your password"
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={e => setConfirmPassword(e.target.value)}
               required
               disabled={isLoading}
             />
           </div>
-          {error && <div className="error-message">{error}</div>}
+          <ErrorMessage message={error} />
           <button type="submit" disabled={isLoading} className="auth-button">
             {isLoading ? 'Creating account...' : 'Create Account'}
           </button>
@@ -115,4 +115,3 @@ const RegisterForm: React.FC = () => {
 };
 
 export default RegisterForm;
-

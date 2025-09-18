@@ -1,36 +1,26 @@
 // frontend/src/hooks/useProjects.tsx
 import { useState, useEffect, useCallback } from 'react';
-import { 
-  Project, 
-  ProjectCreate, 
-  ProjectUpdate, 
-  ProjectFilters, 
-  ProjectListState,
-  ProjectWithContent 
+import {
+  Project, ProjectCreate, ProjectUpdate, ProjectFilters,
+  ProjectListState, ProjectWithContent, ProjectStats
 } from '../types/project-types';
 import { projectAPI, handleApiError } from '../services/project-api';
 
+// Projects list and CRUD hook
 export const useProjects = (initialFilters: ProjectFilters = {}) => {
   const [state, setState] = useState<ProjectListState>({
     projects: [],
     isLoading: false,
     error: undefined,
     filters: { limit: 10, skip: 0, ...initialFilters },
-    pagination: {
-      page: 1,
-      size: 0,
-      total: 0,
-      pages: 0
-    }
+    pagination: { page: 1, size: 0, total: 0, pages: 0 }
   });
 
   const fetchProjects = useCallback(async (filters?: ProjectFilters) => {
     setState(prev => ({ ...prev, isLoading: true, error: undefined }));
-    
     try {
       const filtersToUse = { ...state.filters, ...filters };
       const response = await projectAPI.getProjects(filtersToUse);
-      
       setState(prev => ({
         ...prev,
         projects: response.projects,
@@ -55,17 +45,11 @@ export const useProjects = (initialFilters: ProjectFilters = {}) => {
   const createProject = useCallback(async (projectData: ProjectCreate): Promise<Project | null> => {
     try {
       const newProject = await projectAPI.createProject(projectData);
-      
-      // Add to the beginning of the list
       setState(prev => ({
         ...prev,
         projects: [newProject, ...prev.projects],
-        pagination: {
-          ...prev.pagination,
-          total: prev.pagination.total + 1
-        }
+        pagination: { ...prev.pagination, total: prev.pagination.total + 1 }
       }));
-      
       return newProject;
     } catch (error) {
       setState(prev => ({
@@ -79,15 +63,12 @@ export const useProjects = (initialFilters: ProjectFilters = {}) => {
   const updateProject = useCallback(async (projectId: number, projectData: ProjectUpdate): Promise<Project | null> => {
     try {
       const updatedProject = await projectAPI.updateProject(projectId, projectData);
-      
-      // Update the project in the list
       setState(prev => ({
         ...prev,
-        projects: prev.projects.map(project => 
+        projects: prev.projects.map(project =>
           project.id === projectId ? updatedProject : project
         )
       }));
-      
       return updatedProject;
     } catch (error) {
       setState(prev => ({
@@ -101,17 +82,11 @@ export const useProjects = (initialFilters: ProjectFilters = {}) => {
   const deleteProject = useCallback(async (projectId: number): Promise<boolean> => {
     try {
       await projectAPI.deleteProject(projectId);
-      
-      // Remove from the list
       setState(prev => ({
         ...prev,
         projects: prev.projects.filter(project => project.id !== projectId),
-        pagination: {
-          ...prev.pagination,
-          total: prev.pagination.total - 1
-        }
+        pagination: { ...prev.pagination, total: prev.pagination.total - 1 }
       }));
-      
       return true;
     } catch (error) {
       setState(prev => ({
@@ -123,7 +98,7 @@ export const useProjects = (initialFilters: ProjectFilters = {}) => {
   }, []);
 
   const setFilters = useCallback((filters: Partial<ProjectFilters>) => {
-    const newFilters = { ...state.filters, ...filters, skip: 0 }; // Reset to first page
+    const newFilters = { ...state.filters, ...filters, skip: 0 };
     fetchProjects(newFilters);
   }, [fetchProjects, state.filters]);
 
@@ -132,19 +107,10 @@ export const useProjects = (initialFilters: ProjectFilters = {}) => {
     fetchProjects({ ...state.filters, skip });
   }, [fetchProjects, state.filters]);
 
-  const refreshProjects = useCallback(() => {
-    fetchProjects();
-  }, [fetchProjects]);
+  const refreshProjects = useCallback(() => { fetchProjects(); }, [fetchProjects]);
+  const clearError = useCallback(() => { setState(prev => ({ ...prev, error: undefined })); }, []);
 
-  const clearError = useCallback(() => {
-    setState(prev => ({ ...prev, error: undefined }));
-  }, []);
-
-  // Load projects on mount and when filters change
-  useEffect(() => {
-    fetchProjects();
-  }, []); // Only run on mount
-
+  useEffect(() => { fetchProjects(); }, []);
   return {
     ...state,
     createProject,
@@ -157,7 +123,7 @@ export const useProjects = (initialFilters: ProjectFilters = {}) => {
   };
 };
 
-// Hook for managing a single project with content
+// Single project detail hook
 export const useProject = (projectId: number) => {
   const [project, setProject] = useState<ProjectWithContent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -166,7 +132,6 @@ export const useProject = (projectId: number) => {
   const fetchProject = useCallback(async () => {
     setIsLoading(true);
     setError(undefined);
-
     try {
       const projectData = await projectAPI.getProject(projectId);
       setProject(projectData);
@@ -212,21 +177,21 @@ export const useProject = (projectId: number) => {
   };
 };
 
-// Hook for project statistics
+// Project statistics hook
 export const useProjectStats = (projectId: number) => {
-  const [stats, setStats] = useState(null);
+  const [stats, setStats] = useState<ProjectStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
   const fetchStats = useCallback(async () => {
-    if (!projectId) return;
-    
+    if (!projectId) {
+      return;
+    }
     setIsLoading(true);
     setError(undefined);
-
     try {
-      const statsData = await projectAPI.getProjectStats(projectId);
-      setStats(statsData);
+      const statsData = await projectAPI.getProjectStats(projectId); // FIXED
+      setStats(statsData); // Use this state for results
     } catch (err) {
       setError(handleApiError(err));
     } finally {
@@ -243,9 +208,6 @@ export const useProjectStats = (projectId: number) => {
   }, [fetchStats]);
 
   return {
-    stats,
-    isLoading,
-    error,
-    refreshStats
+    stats, isLoading, error, refreshStats
   };
 };

@@ -1,34 +1,25 @@
+// frontend/src/components/ProtectedRoute.tsx
 import React from 'react';
-import { useAuth } from '@/hooks/useAuth';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+import LoadingSpinner from './common/LoadingSpinner';
 
 interface ProtectedRouteProps {
-  children: React.ReactNode;
+  children: JSX.Element;
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { user, isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
-    return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <p>Loading...</p>
-      </div>
-    );
+    return <LoadingSpinner />;
   }
 
-  if (!user) {
-    return (
-      <div className="auth-required">
-        <h2>Authentication Required</h2>
-        <p>Please log in to access this page.</p>
-        <a href="/login" className="auth-button">Go to Login</a>
-      </div>
-    );
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
   }
 
-  return <>{children}</>;
+  return children;
 };
 
 export default ProtectedRoute;
-

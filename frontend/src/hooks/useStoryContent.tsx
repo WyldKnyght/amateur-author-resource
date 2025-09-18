@@ -1,11 +1,7 @@
 // frontend/src/hooks/useStoryContent.tsx
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  StoryContent, 
-  StoryContentUpdate, 
-  ProjectEditorState 
-} from '../types/project-types';
-import { projectAPI, handleApiError, AutoSaveManager } from '../services/project-api';
+import { ProjectEditorState, StoryContent } from '../types/project-types';
+import { handleApiError, AutoSaveManager, projectAPI } from '../services/project-api';
 
 export const useStoryContent = (projectId: number, autoSaveDelay: number = 3000) => {
   const [state, setState] = useState<ProjectEditorState>({
@@ -15,42 +11,37 @@ export const useStoryContent = (projectId: number, autoSaveDelay: number = 3000)
     hasUnsavedChanges: false,
     lastSaved: undefined,
     error: undefined,
-    content: ''
+    content: null
   });
-
   const autoSaveManager = useRef<AutoSaveManager | null>(null);
   const lastSavedContent = useRef<string>('');
 
-  // Initialize auto-save manager
   useEffect(() => {
     if (projectId) {
       autoSaveManager.current = new AutoSaveManager(projectId, autoSaveDelay);
     }
-    
     return () => {
-      autoSaveManager.current?.destroy();
+      if (autoSaveManager.current) {
+        autoSaveManager.current.destroy();
+      }
     };
   }, [projectId, autoSaveDelay]);
 
-  // Load initial content
   const loadContent = useCallback(async () => {
-    if (!projectId) return;
-
+    if (!projectId) {
+      return;
+    }
     setState(prev => ({ ...prev, isLoading: true, error: undefined }));
-
     try {
-      const content = await projectAPI.getStoryContent(projectId);
-      const contentText = content.content || '';
-      
+      const contentData = await projectAPI.getStoryContent(projectId);
       setState(prev => ({
         ...prev,
         isLoading: false,
-        content: contentText,
+        content: contentData,
         hasUnsavedChanges: false,
-        lastSaved: content.updated_at
+        lastSaved: contentData.updated_at
       }));
-      
-      lastSavedContent.current = contentText;
+      lastSavedContent.current = contentData.content || '';
     } catch (error) {
       setState(prev => ({
         ...prev,
@@ -60,22 +51,18 @@ export const useStoryContent = (projectId: number, autoSaveDelay: number = 3000)
     }
   }, [projectId]);
 
-  // Update content in state and schedule auto-save
   const updateContent = useCallback((newContent: string) => {
     setState(prev => ({
       ...prev,
-      content: newContent,
+      content: prev.content ? { ...prev.content, content: newContent } : null,
       hasUnsavedChanges: newContent !== lastSavedContent.current,
       error: undefined
     }));
-
-    // Schedule auto-save if content has changed
     if (newContent !== lastSavedContent.current && autoSaveManager.current) {
       setState(prev => ({ ...prev, isAutoSaving: true }));
-      
       autoSaveManager.current.scheduleAutoSave(newContent, () => {
-        setState(prev => ({ 
-          ...prev, 
+        setState(prev => ({
+          ...prev,
           isAutoSaving: false,
           lastSaved: new Date().toISOString()
         }));
@@ -84,31 +71,23 @@ export const useStoryContent = (projectId: number, autoSaveDelay: number = 3000)
     }
   }, []);
 
-  // Manual save
-  const saveContent = useCallback(async (content?: string): Promise<boolean> => {
-    const contentToSave = content !== undefined ? content : state.content;
-    
+  const saveContent = useCallback(async (): Promise<boolean> => {
+    if (!state.content) {
+      return false;
+    }
+    const contentToSave = state.content.content || '';
     setState(prev => ({ ...prev, isSaving: true, error: undefined }));
-
     try {
-      const savedContent = await projectAPI.saveStoryContent(projectId, {
-        content: contentToSave,
-        auto_saved: false,
-        save_reason: 'manual_save'
-      });
-
+      const savedContent = await projectAPI.saveStoryContent(projectId, { content: contentToSave });
       setState(prev => ({
         ...prev,
         isSaving: false,
         hasUnsavedChanges: false,
-        lastSaved: savedContent.updated_at
+        lastSaved: savedContent.updated_at,
+        content: savedContent
       }));
-
       lastSavedContent.current = contentToSave;
-      
-      // Cancel any pending auto-save
       autoSaveManager.current?.cancel();
-      
       return true;
     } catch (error) {
       setState(prev => ({
@@ -120,82 +99,35 @@ export const useStoryContent = (projectId: number, autoSaveDelay: number = 3000)
     }
   }, [projectId, state.content]);
 
-  // Force save (bypass auto-save)
-  const forceSave = useCallback(() => {
-    autoSaveManager.current?.cancel();
-    return saveContent();
-  }, [saveContent]);
-
-  // Version management
   const createVersion = useCallback(async (): Promise<boolean> => {
     try {
       await projectAPI.createContentVersion(projectId);
-      // Refresh content to get the new version info
-      await loadContent();
       return true;
     } catch (error) {
-      setState(prev => ({
-        ...prev,
-        error: handleApiError(error)
-      }));
+      setState(prev => ({ ...prev, error: handleApiError(error) }));
       return false;
     }
-  }, [projectId, loadContent]);
+  }, [projectId]);
 
-  const restoreVersion = useCallback(async (version: number): Promise<boolean> => {
-    try {
-      await projectAPI.restoreContentVersion(projectId, version);
-      // Refresh content to get the restored version
-      await loadContent();
-      return true;
-    } catch (error) {
-      setState(prev => ({
-        ...prev,
-        error: handleApiError(error)
-      }));
-      return false;
-    }
-  }, [projectId, loadContent]);
-
-  // Utility functions
   const clearError = useCallback(() => {
     setState(prev => ({ ...prev, error: undefined }));
   }, []);
+  const refreshContent = useCallback(() => { loadContent(); }, [loadContent]);
 
-  const refreshContent = useCallback(() => {
-    loadContent();
-  }, [loadContent]);
-
-  // Keyboard shortcut support
   const handleKeyboardShortcuts = useCallback((event: KeyboardEvent) => {
-    if (event.ctrlKey || event.metaKey) {
-      switch (event.key) {
-        case 's':
-          event.preventDefault();
-          saveContent();
-          break;
-        case 'b': // Backup/Version
-          event.preventDefault();
-          createVersion();
-          break;
-      }
+    if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+      event.preventDefault();
+      saveContent();
     }
-  }, [saveContent, createVersion]);
+  }, [saveContent]);
 
-  // Set up keyboard shortcuts
   useEffect(() => {
     window.addEventListener('keydown', handleKeyboardShortcuts);
-    return () => {
-      window.removeEventListener('keydown', handleKeyboardShortcuts);
-    };
+    return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
   }, [handleKeyboardShortcuts]);
 
-  // Load content on mount
-  useEffect(() => {
-    loadContent();
-  }, [loadContent]);
+  useEffect(() => { loadContent(); }, [loadContent]);
 
-  // Warn user about unsaved changes when leaving
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (state.hasUnsavedChanges) {
@@ -203,42 +135,35 @@ export const useStoryContent = (projectId: number, autoSaveDelay: number = 3000)
         event.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
       }
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
-    
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [state.hasUnsavedChanges]);
 
   return {
     ...state,
     updateContent,
     saveContent,
-    forceSave,
     createVersion,
-    restoreVersion,
     clearError,
     refreshContent,
     loadContent
   };
 };
 
-// Hook for managing content versions
 export const useContentVersions = (projectId: number) => {
   const [versions, setVersions] = useState<StoryContent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
   const fetchVersions = useCallback(async () => {
-    if (!projectId) return;
-
+    if (!projectId) {
+      return;
+    }
     setIsLoading(true);
     setError(undefined);
-
     try {
-      const versionsData = await projectAPI.getContentVersions(projectId);
-      setVersions(versionsData);
+      const versionData = await projectAPI.getContentVersions(projectId);
+      setVersions(versionData);
     } catch (err) {
       setError(handleApiError(err));
     } finally {
@@ -258,45 +183,6 @@ export const useContentVersions = (projectId: number) => {
     versions,
     isLoading,
     error,
-    refreshVersions
-  };
-};
-
-// Hook for content backup
-export const useContentBackup = () => {
-  const [isExporting, setIsExporting] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-
-  const exportBackup = useCallback(async (projectId: number) => {
-    setIsExporting(true);
-    setError(undefined);
-
-    try {
-      const backup = await projectAPI.backupContent(projectId);
-      
-      // Create and download file
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${backup.project.title}_backup_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      return true;
-    } catch (err) {
-      setError(handleApiError(err));
-      return false;
-    } finally {
-      setIsExporting(false);
-    }
-  }, []);
-
-  return {
-    isExporting,
-    error,
-    exportBackup
+    refreshVersions,
   };
 };

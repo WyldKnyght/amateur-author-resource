@@ -1,6 +1,8 @@
+// frontend/src/components/auth/LoginForm.tsx
 import React, { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Link, useNavigate } from 'react-router-dom';
+import ErrorMessage from '../common/ErrorMessage';
 
 const LoginForm: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -42,7 +44,7 @@ const LoginForm: React.FC = () => {
               type="text"
               placeholder="Enter your username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={e => setUsername(e.target.value)}
               required
               disabled={isLoading}
             />
@@ -54,12 +56,12 @@ const LoginForm: React.FC = () => {
               type="password"
               placeholder="Enter your password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={e => setPassword(e.target.value)}
               required
               disabled={isLoading}
             />
           </div>
-          {error && <div className="error-message">{error}</div>}
+          <ErrorMessage message={error} />
           <button type="submit" disabled={isLoading} className="auth-button">
             {isLoading ? 'Signing in...' : 'Sign In'}
           </button>
@@ -73,4 +75,3 @@ const LoginForm: React.FC = () => {
 };
 
 export default LoginForm;
-

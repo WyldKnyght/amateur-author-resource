@@ -13,3 +13,4 @@ pytest-asyncio==0.23.6
 treelib
 alembic
 axios
+python-jose

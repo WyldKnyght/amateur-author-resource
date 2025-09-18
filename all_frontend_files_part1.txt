@@ -1,0 +1,1605 @@
+
+================================================================================
+## FILE: frontend/src\App.css
+
+/* frontend/src/App.css
+/* Core styles for App, authentication, loading, and dashboard UI */
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  background: #f8f9fa;
+  color: #333;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.main-content {
+  flex: 1;
+}
+
+/* Authentication styles */
+.auth-container {
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.auth-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.08);
+  padding: 40px;
+  width: 100%;
+  max-width: 400px;
+}
+.auth-card h2 { text-align: center; margin-bottom: 8px; color: #1a1a1a;}
+.auth-form { display: flex; flex-direction: column; gap: 20px;}
+.form-group { display: flex; flex-direction: column; gap: 6px;}
+.form-group label { font-weight: 600; }
+.auth-button {
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  text-align: center;
+}
+.auth-button:disabled { background-color: #9ca3af; cursor: not-allowed; }
+.auth-link { text-align: center; margin-top: 14px; color: #666; }
+.auth-link a { color: #3b82f6; text-decoration: none; }
+
+.error-message {
+  background-color: #fef2f2;
+  color: #dc2626;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  font-size: 14px;
+}
+
+/* Loading */
+.loading-container {
+  display: flex; flex-direction: column; align-items: center; min-height: 200px; gap: 16px;
+}
+.loading-spinner {
+  width: 40px; height: 40px;
+  border: 4px solid #e5e7eb;
+  border-top: 4px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Home & dashboard styles can be extended as needed */
+
+
+================================================================================
+## FILE: frontend/src\App.tsx
+
+// frontend/src/App.tsx
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from "./context/AuthContext"; 
+import ProtectedRoute from './components/ProtectedRoute';
+import LoginForm from './components/auth/LoginForm';
+import Dashboard from './pages/Dashboard';
+import ProjectsDashboard from './pages/ProjectsDashboard';
+import ProjectEditorPage from './pages/ProjectEditorPage';
+import HomePage from './pages/HomePage';
+import RegisterPage from './pages/RegisterPage'; // Import the new page
+import './App.css';
+
+const App: React.FC = () => {
+  return (
+    <Router>
+      <AuthProvider>
+        <div className="app">
+          <main className="main-content">
+            <Routes>
+              <Route path="/login" element={<LoginForm />} />
+              <Route path="/register" element={<RegisterPage />} /> {/* Add this line */}
+              <Route path="/home" element={<HomePage />} />
+              <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/projects" element={<ProtectedRoute><ProjectsDashboard /></ProtectedRoute>} />
+              <Route path="/projects/:projectId/editor" element={<ProtectedRoute><ProjectEditorPage /></ProtectedRoute>} />
+              <Route path="*" element={<Navigate to="/login" />} />
+            </Routes>
+          </main>
+        </div>
+      </AuthProvider>
+    </Router>
+  );
+};
+
+export default App;
+
+================================================================================
+## FILE: frontend/src\main.tsx
+
+// frontend/src/main.tsx
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+
+================================================================================
+## FILE: frontend/src\components\ProtectedRoute.tsx
+
+// frontend/src/components/ProtectedRoute.tsx
+import React from 'react';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+import LoadingSpinner from './common/LoadingSpinner';
+
+interface ProtectedRouteProps {
+  children: JSX.Element;
+}
+
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
+export default ProtectedRoute;
+================================================================================
+## FILE: frontend/src\components\auth\LoginForm.tsx
+
+// frontend/src/components/auth/LoginForm.tsx
+import React, { useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { Link, useNavigate } from 'react-router-dom';
+import ErrorMessage from '../common/ErrorMessage';
+
+const LoginForm: React.FC = () => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const success = await login(username, password);
+      if (success) {
+        navigate('/dashboard');
+      } else {
+        setError('Invalid username or password');
+      }
+    } catch {
+      setError('Login failed. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-container">
+      <div className="auth-card">
+        <h2>Welcome Back</h2>
+        <p>Sign in to your Fiction Platform account</p>
+        <form onSubmit={handleSubmit} className="auth-form">
+          <div className="form-group">
+            <label htmlFor="username">Username</label>
+            <input
+              id="username"
+              type="text"
+              placeholder="Enter your username"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              required
+              disabled={isLoading}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+              disabled={isLoading}
+            />
+          </div>
+          <ErrorMessage message={error} />
+          <button type="submit" disabled={isLoading} className="auth-button">
+            {isLoading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
+        <p className="auth-link">
+          Don't have an account? <Link to="/register">Sign up here</Link>
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default LoginForm;
+
+================================================================================
+## FILE: frontend/src\components\auth\RegisterForm.tsx
+
+// frontend/src/components/auth/RegisterForm.tsx
+import React, { useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { Link, useNavigate } from 'react-router-dom';
+import ErrorMessage from '../common/ErrorMessage';
+
+const RegisterForm: React.FC = () => {
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { register } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
+    }
+    setIsLoading(true);
+
+    try {
+      const success = await register(username, email, password);
+      if (success) {
+        navigate('/login', {
+          state: { message: 'Account created successfully! Please log in.' }
+        });
+      } else {
+        setError('Registration failed. Username or email may already exist.');
+      }
+    } catch {
+      setError('Registration failed. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-container">
+      <div className="auth-card">
+        <h2>Join Fiction Platform</h2>
+        <p>Create your account to start writing</p>
+        <form onSubmit={handleSubmit} className="auth-form">
+          <div className="form-group">
+            <label htmlFor="username">Username</label>
+            <input
+              id="username"
+              type="text"
+              placeholder="Choose a username"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              required
+              minLength={3}
+              maxLength={50}
+              disabled={isLoading}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              placeholder="Enter your email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+              disabled={isLoading}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              placeholder="Create a password (8+ characters)"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+              minLength={8}
+              disabled={isLoading}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="confirmPassword">Confirm Password</label>
+            <input
+              id="confirmPassword"
+              type="password"
+              placeholder="Confirm your password"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              required
+              disabled={isLoading}
+            />
+          </div>
+          <ErrorMessage message={error} />
+          <button type="submit" disabled={isLoading} className="auth-button">
+            {isLoading ? 'Creating account...' : 'Create Account'}
+          </button>
+        </form>
+        <p className="auth-link">
+          Already have an account? <Link to="/login">Sign in here</Link>
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default RegisterForm;
+
+================================================================================
+## FILE: frontend/src\components\common\ErrorMessage.tsx
+
+// frontend/src/components/common/ErrorMessage.tsx
+import React from 'react';
+
+interface ErrorMessageProps {
+  message: string;
+}
+
+const ErrorMessage: React.FC<ErrorMessageProps> = ({ message }) =>
+  message ? <div className="error-message">{message}</div> : null;
+
+export default ErrorMessage;
+
+================================================================================
+## FILE: frontend/src\components\common\LoadingSpinner.tsx
+
+// src/components/common/LoadingSpinner.tsx
+import React from "react";
+
+const LoadingSpinner: React.FC = () => (
+  <div className="loading-container">
+    <div className="loading-spinner" />
+    <p>Loading...</p>
+  </div>
+);
+
+export default LoadingSpinner;
+
+================================================================================
+## FILE: frontend/src\components\projects\CreateProjectForm.tsx
+
+// src/components/projects/CreateProjectForm.tsx
+import React, { useState } from "react";
+import { GENRE_OPTIONS, STATUS_OPTIONS } from "../../types/project-types";
+
+interface Props {
+  onSubmit: (projectData: any) => void;
+  onCancel: () => void;
+}
+
+const CreateProjectForm: React.FC<Props> = ({ onSubmit, onCancel }) => {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [genre, setGenre] = useState<string>(GENRE_OPTIONS[0]);
+  const [status, setStatus] = useState<"draft" | "in_progress" | "completed" | "published">(STATUS_OPTIONS[0].value);
+  const [targetWordCount, setTargetWordCount] = useState<number | "">("");
+  interface FormErrors {
+    title?: string;
+  }
+  
+  const [errors, setErrors] = useState<FormErrors>({});
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setErrors({ title: "Title is required" });
+      return;
+    }
+    onSubmit({ title, description, genre, status, targetWordCount });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="project-form">
+      <h2>Create New Project</h2>
+      <label>
+        Title
+        <input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          required
+        />
+        {errors.title && <span className="error">{errors.title}</span>}
+      </label>
+      <label>
+        Description
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+        />
+      </label>
+      <label>
+        Genre
+        <select value={genre} onChange={e => setGenre(e.target.value)}>
+          {GENRE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      </label>
+      <label>
+        Status
+        <select value={status} onChange={e => setStatus(e.target.value as "draft" | "in_progress" | "completed" | "published")}>
+          {STATUS_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Target Word Count
+        <input
+          type="number"
+          min="0"
+          value={targetWordCount}
+          onChange={e => setTargetWordCount(Number(e.target.value))}
+        />
+      </label>
+      <div className="form-actions">
+        <button type="submit" className="btn-primary">Create</button>
+        <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  );
+};
+
+export default CreateProjectForm;
+
+================================================================================
+## FILE: frontend/src\components\projects\DeleteProjectModal.tsx
+
+// src/components/projects/DeleteProjectModal.tsx
+import React from "react";
+import { Project } from "../../types/project-types";
+
+interface Props {
+  project: Project | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+const DeleteProjectModal: React.FC<Props> = ({ project, onConfirm, onCancel }) => {
+  if (!project) {
+    return null;
+  }
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <h2>Delete Project</h2>
+        <p>
+// sourcery skip: only-delete-object-properties
+          Are you sure you want to delete "<strong>{project.title}</strong>"?
+          This action cannot be undone.
+        </p>
+        <div className="modal-actions">
+          <button className="btn-danger" onClick={onConfirm}>Remove</button>
+          <button className="btn-secondary" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default DeleteProjectModal;
+
+================================================================================
+## FILE: frontend/src\components\projects\ProjectList.tsx
+
+// src/components/projects/ProjectList.tsx
+import React from "react";
+import { Project } from "../../types/project-types";
+
+interface Props {
+  projects: Project[];
+  isLoading: boolean;
+  onProjectSelect: (id: number) => void;
+  onProjectEdit?: (proj: Project) => void;
+  onProjectDelete?: (id: number) => void;
+  showCreateButton?: boolean;
+  onCreateNew?: () => void;
+}
+
+const ProjectList: React.FC<Props> = ({
+  projects,
+  isLoading,
+  onProjectSelect,
+  onProjectEdit,
+  onProjectDelete,
+  showCreateButton,
+  onCreateNew,
+}) => {
+  if (isLoading) return <div>Loading...</div>;
+  if (!projects.length)
+    return <div>No projects found.</div>;
+
+  return (
+    <div className="project-list">
+      {showCreateButton && (
+        <button className="btn-primary" onClick={onCreateNew}>
+          Create New Project
+        </button>
+      )}
+      <ul>
+        {projects.map(project => (
+          <li key={project.id} className="project-card">
+            <span onClick={() => onProjectSelect(project.id)}>
+              {project.title}
+            </span>
+            {onProjectEdit && (
+              <button onClick={() => onProjectEdit(project)}>
+                Edit
+              </button>
+            )}
+            {onProjectDelete && (
+              <button onClick={() => onProjectDelete(project.id)}>
+                Delete
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+export default ProjectList;
+
+================================================================================
+## FILE: frontend/src\context\AuthContext.tsx
+
+// src/context/AuthContext.tsx
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { AuthContextType, User } from "../types/auth-types";
+
+export const AuthContext = createContext<AuthContextType | null>(null);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState<string>("");
+
+  useEffect(() => { checkAuth(); }, []);
+
+  // Always send Authorization: Bearer <token>
+  const checkAuth = async () => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("access_token");
+      const response = await fetch("/api/auth/me", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (response.ok) {
+        setUser(await response.json());
+        setAuthError("");
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    }
+    setIsLoading(false);
+  };
+
+  const login = async (username: string, password: string): Promise<boolean> => {
+    setAuthError("");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        localStorage.setItem("access_token", data.access_token); // Store token!
+        await checkAuth();
+        return true;
+      }
+      setAuthError("Invalid username or password");
+      return false;
+    } catch {
+      setAuthError("Login failed. Please try again.");
+      return false;
+    }
+  };
+
+  const register = async (username: string, email: string, password: string): Promise<boolean> => {
+    setAuthError("");
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, email, password })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        localStorage.setItem("access_token", data.access_token); // Store token!
+        await checkAuth();
+        return true;
+      }
+      setAuthError("Registration failed. Username or email may already exist.");
+      return false;
+    } catch {
+      setAuthError("Registration failed. Please try again.");
+      return false;
+    }
+  };
+
+  const logout = async () => {
+    try { await fetch("/api/auth/logout", { method: "POST" }); } catch {}
+    setUser(null);
+    localStorage.removeItem("access_token");
+    setAuthError("");
+  };
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      isAuthenticated: !!user,
+      login,
+      register,
+      logout,
+      isLoading,
+      authError,
+      clearAuthError: () => setAuthError("")
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+};
+
+================================================================================
+## FILE: frontend/src\hooks\useAuth.tsx
+
+// frontend/src/hooks/useAuth.tsx
+import { useContext } from 'react';
+import { AuthContext } from '../context/AuthContext';
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+================================================================================
+## FILE: frontend/src\hooks\useProjects.tsx
+
+// frontend/src/hooks/useProjects.tsx
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Project, ProjectCreate, ProjectUpdate, ProjectFilters,
+  ProjectListState, ProjectWithContent, ProjectStats
+} from '../types/project-types';
+import { projectAPI, handleApiError } from '../services/project-api';
+
+// Projects list and CRUD hook
+export const useProjects = (initialFilters: ProjectFilters = {}) => {
+  const [state, setState] = useState<ProjectListState>({
+    projects: [],
+    isLoading: false,
+    error: undefined,
+    filters: { limit: 10, skip: 0, ...initialFilters },
+    pagination: { page: 1, size: 0, total: 0, pages: 0 }
+  });
+
+  const fetchProjects = useCallback(async (filters?: ProjectFilters) => {
+    setState(prev => ({ ...prev, isLoading: true, error: undefined }));
+    try {
+      const filtersToUse = { ...state.filters, ...filters };
+      const response = await projectAPI.getProjects(filtersToUse);
+      setState(prev => ({
+        ...prev,
+        projects: response.projects,
+        isLoading: false,
+        filters: filtersToUse,
+        pagination: {
+          page: response.page,
+          size: response.size,
+          total: response.total,
+          pages: response.pages
+        }
+      }));
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: handleApiError(error)
+      }));
+    }
+  }, [state.filters]);
+
+  const createProject = useCallback(async (projectData: ProjectCreate): Promise<Project | null> => {
+    try {
+      const newProject = await projectAPI.createProject(projectData);
+      setState(prev => ({
+        ...prev,
+        projects: [newProject, ...prev.projects],
+        pagination: { ...prev.pagination, total: prev.pagination.total + 1 }
+      }));
+      return newProject;
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        error: handleApiError(error)
+      }));
+      return null;
+    }
+  }, []);
+
+  const updateProject = useCallback(async (projectId: number, projectData: ProjectUpdate): Promise<Project | null> => {
+    try {
+      const updatedProject = await projectAPI.updateProject(projectId, projectData);
+      setState(prev => ({
+        ...prev,
+        projects: prev.projects.map(project =>
+          project.id === projectId ? updatedProject : project
+        )
+      }));
+      return updatedProject;
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        error: handleApiError(error)
+      }));
+      return null;
+    }
+  }, []);
+
+  const deleteProject = useCallback(async (projectId: number): Promise<boolean> => {
+    try {
+      await projectAPI.deleteProject(projectId);
+      setState(prev => ({
+        ...prev,
+        projects: prev.projects.filter(project => project.id !== projectId),
+        pagination: { ...prev.pagination, total: prev.pagination.total - 1 }
+      }));
+      return true;
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        error: handleApiError(error)
+      }));
+      return false;
+    }
+  }, []);
+
+  const setFilters = useCallback((filters: Partial<ProjectFilters>) => {
+    const newFilters = { ...state.filters, ...filters, skip: 0 };
+    fetchProjects(newFilters);
+  }, [fetchProjects, state.filters]);
+
+  const setPage = useCallback((page: number) => {
+    const skip = (page - 1) * (state.filters.limit || 10);
+    fetchProjects({ ...state.filters, skip });
+  }, [fetchProjects, state.filters]);
+
+  const refreshProjects = useCallback(() => { fetchProjects(); }, [fetchProjects]);
+  const clearError = useCallback(() => { setState(prev => ({ ...prev, error: undefined })); }, []);
+
+  useEffect(() => { fetchProjects(); }, []);
+  return {
+    ...state,
+    createProject,
+    updateProject,
+    deleteProject,
+    setFilters,
+    setPage,
+    refreshProjects,
+    clearError
+  };
+};
+
+// Single project detail hook
+export const useProject = (projectId: number) => {
+  const [project, setProject] = useState<ProjectWithContent | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const fetchProject = useCallback(async () => {
+    setIsLoading(true);
+    setError(undefined);
+    try {
+      const projectData = await projectAPI.getProject(projectId);
+      setProject(projectData);
+    } catch (err) {
+      setError(handleApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId]);
+
+  const updateProject = useCallback(async (projectData: ProjectUpdate): Promise<boolean> => {
+    try {
+      const updatedProject = await projectAPI.updateProject(projectId, projectData);
+      setProject(prev => prev ? { ...prev, ...updatedProject } : updatedProject);
+      return true;
+    } catch (err) {
+      setError(handleApiError(err));
+      return false;
+    }
+  }, [projectId]);
+
+  const refreshProject = useCallback(() => {
+    fetchProject();
+  }, [fetchProject]);
+
+  const clearError = useCallback(() => {
+    setError(undefined);
+  }, []);
+
+  useEffect(() => {
+    if (projectId) {
+      fetchProject();
+    }
+  }, [projectId, fetchProject]);
+
+  return {
+    project,
+    isLoading,
+    error,
+    updateProject,
+    refreshProject,
+    clearError
+  };
+};
+
+// Project statistics hook
+export const useProjectStats = (projectId: number) => {
+  const [stats, setStats] = useState<ProjectStats | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const fetchStats = useCallback(async () => {
+    if (!projectId) {
+      return;
+    }
+    setIsLoading(true);
+    setError(undefined);
+    try {
+      const statsData = await projectAPI.getProjectStats(projectId); // FIXED
+      setStats(statsData); // Use this state for results
+    } catch (err) {
+      setError(handleApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId]);
+
+  const refreshStats = useCallback(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  return {
+    stats, isLoading, error, refreshStats
+  };
+};
+
+================================================================================
+## FILE: frontend/src\hooks\useStoryContent.tsx
+
+// frontend/src/hooks/useStoryContent.tsx
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ProjectEditorState, StoryContent } from '../types/project-types';
+import { handleApiError, AutoSaveManager, projectAPI } from '../services/project-api';
+
+export const useStoryContent = (projectId: number, autoSaveDelay: number = 3000) => {
+  const [state, setState] = useState<ProjectEditorState>({
+    isLoading: false,
+    isSaving: false,
+    isAutoSaving: false,
+    hasUnsavedChanges: false,
+    lastSaved: undefined,
+    error: undefined,
+    content: null
+  });
+  const autoSaveManager = useRef<AutoSaveManager | null>(null);
+  const lastSavedContent = useRef<string>('');
+
+  useEffect(() => {
+    if (projectId) {
+      autoSaveManager.current = new AutoSaveManager(projectId, autoSaveDelay);
+    }
+    return () => {
+      if (autoSaveManager.current) {
+        autoSaveManager.current.destroy();
+      }
+    };
+  }, [projectId, autoSaveDelay]);
+
+  const loadContent = useCallback(async () => {
+    if (!projectId) {
+      return;
+    }
+    setState(prev => ({ ...prev, isLoading: true, error: undefined }));
+    try {
+      const contentData = await projectAPI.getStoryContent(projectId);
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        content: contentData,
+        hasUnsavedChanges: false,
+        lastSaved: contentData.updated_at
+      }));
+      lastSavedContent.current = contentData.content || '';
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: handleApiError(error)
+      }));
+    }
+  }, [projectId]);
+
+  const updateContent = useCallback((newContent: string) => {
+    setState(prev => ({
+      ...prev,
+      content: prev.content ? { ...prev.content, content: newContent } : null,
+      hasUnsavedChanges: newContent !== lastSavedContent.current,
+      error: undefined
+    }));
+    if (newContent !== lastSavedContent.current && autoSaveManager.current) {
+      setState(prev => ({ ...prev, isAutoSaving: true }));
+      autoSaveManager.current.scheduleAutoSave(newContent, () => {
+        setState(prev => ({
+          ...prev,
+          isAutoSaving: false,
+          lastSaved: new Date().toISOString()
+        }));
+        lastSavedContent.current = newContent;
+      });
+    }
+  }, []);
+
+  const saveContent = useCallback(async (): Promise<boolean> => {
+    if (!state.content) {
+      return false;
+    }
+    const contentToSave = state.content.content || '';
+    setState(prev => ({ ...prev, isSaving: true, error: undefined }));
+    try {
+      const savedContent = await projectAPI.saveStoryContent(projectId, { content: contentToSave });
+      setState(prev => ({
+        ...prev,
+        isSaving: false,
+        hasUnsavedChanges: false,
+        lastSaved: savedContent.updated_at,
+        content: savedContent
+      }));
+      lastSavedContent.current = contentToSave;
+      autoSaveManager.current?.cancel();
+      return true;
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        isSaving: false,
+        error: handleApiError(error)
+      }));
+      return false;
+    }
+  }, [projectId, state.content]);
+
+  const createVersion = useCallback(async (): Promise<boolean> => {
+    try {
+      await projectAPI.createContentVersion(projectId);
+      return true;
+    } catch (error) {
+      setState(prev => ({ ...prev, error: handleApiError(error) }));
+      return false;
+    }
+  }, [projectId]);
+
+  const clearError = useCallback(() => {
+    setState(prev => ({ ...prev, error: undefined }));
+  }, []);
+  const refreshContent = useCallback(() => { loadContent(); }, [loadContent]);
+
+  const handleKeyboardShortcuts = useCallback((event: KeyboardEvent) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+      event.preventDefault();
+      saveContent();
+    }
+  }, [saveContent]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyboardShortcuts);
+    return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
+  }, [handleKeyboardShortcuts]);
+
+  useEffect(() => { loadContent(); }, [loadContent]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (state.hasUnsavedChanges) {
+        event.preventDefault();
+        event.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [state.hasUnsavedChanges]);
+
+  return {
+    ...state,
+    updateContent,
+    saveContent,
+    createVersion,
+    clearError,
+    refreshContent,
+    loadContent
+  };
+};
+
+export const useContentVersions = (projectId: number) => {
+  const [versions, setVersions] = useState<StoryContent[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const fetchVersions = useCallback(async () => {
+    if (!projectId) {
+      return;
+    }
+    setIsLoading(true);
+    setError(undefined);
+    try {
+      const versionData = await projectAPI.getContentVersions(projectId);
+      setVersions(versionData);
+    } catch (err) {
+      setError(handleApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId]);
+
+  const refreshVersions = useCallback(() => {
+    fetchVersions();
+  }, [fetchVersions]);
+
+  useEffect(() => {
+    fetchVersions();
+  }, [fetchVersions]);
+
+  return {
+    versions,
+    isLoading,
+    error,
+    refreshVersions,
+  };
+};
+
+================================================================================
+## FILE: frontend/src\pages\Dashboard.css
+
+/* Dashboard.css - Styling for the main dashboard */
+.dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #e1e5e9;
+}
+
+.dashboard-header h1 {
+  color: #2c3e50;
+  font-size: 2rem;
+  margin: 0;
+}
+
+.dashboard-actions {
+  display: flex;
+  gap: 15px;
+}
+
+.btn-primary, .btn-secondary {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  text-decoration: none;
+  display: inline-block;
+  transition: background-color 0.3s ease;
+}
+
+.btn-primary {
+  background-color: #3498db;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #2980b9;
+}
+
+.btn-secondary {
+  background-color: #95a5a6;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background-color: #7f8c8d;
+}
+
+.dashboard-content {
+  display: grid;
+  gap: 30px;
+}
+
+.analytics-section h2,
+.recent-projects h2 {
+  color: #2c3e50;
+  margin-bottom: 20px;
+  font-size: 1.5rem;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: white;
+  padding: 25px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  border: 1px solid #e1e5e9;
+}
+
+.stat-card h3 {
+  font-size: 2rem;
+  color: #3498db;
+  margin: 0 0 10px 0;
+  font-weight: bold;
+}
+
+.stat-card p {
+  color: #7f8c8d;
+  margin: 0;
+  font-weight: 500;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 2px dashed #dee2e6;
+}
+
+.empty-state p {
+  color: #6c757d;
+  font-size: 1.1rem;
+  margin-bottom: 20px;
+}
+
+================================================================================
+## FILE: frontend/src\pages\Dashboard.tsx
+
+// frontend/src/pages/Dashboard.tsx
+import React, { useEffect, useState } from 'react';
+import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from '@/hooks/useAuth';
+import { useProjects } from '@/hooks/useProjects';
+import ProjectList from '@/components/projects/ProjectList';
+import LoadingSpinner from '@/components/common/LoadingSpinner';
+import ErrorMessage from '@/components/common/ErrorMessage';
+
+interface DashboardData {
+  message: string;
+  user: {
+    id: number;
+    username: string;
+    email: string;
+    member_since: string;
+  };
+  stats: {
+    projects: number;
+    characters: number;
+    word_count: number;
+  };
+}
+
+interface UserStats {
+  totalProjects: number;
+  totalWords: number;
+  averageWordsPerProject: number;
+  lastUpdated: string;
+}
+
+const Dashboard: React.FC = () => {
+  const { user, logout } = useAuth();
+  const {
+    projects,
+    isLoading: projectsLoading,
+    error: projectsError,
+    refreshProjects
+  } = useProjects();
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState<UserStats>({
+    totalProjects: 0,
+    totalWords: 0,
+    averageWordsPerProject: 0,
+    lastUpdated: new Date().toISOString(),
+  });
+  const navigate = useNavigate();
+
+  // Fetch dashboard data from API
+  useEffect(() => {
+    fetchDashboardData();
+    refreshProjects();
+    // eslint-disable-next-line
+  }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      const token = localStorage.getItem("access_token");
+      const response = await fetch("/api/users/dashboard", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+
+      if (response.ok) {
+        const data = await response.json();
+        setDashboardData(data);
+      }
+    } catch {
+      // Optionally handle fetch errors here
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Calculate stats from projects (if available)
+  useEffect(() => {
+    if (projects.length > 0) {
+      const totalWords = projects.reduce((sum, project) => sum + (project.word_count || 0), 0);
+      const avgWords = Math.round(totalWords / projects.length);
+      setStats({
+        totalProjects: projects.length,
+        totalWords,
+        averageWordsPerProject: avgWords,
+        lastUpdated: new Date().toISOString(),
+      });
+    }
+  }, [projects]);
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
+
+  if (isLoading || projectsLoading) {
+    return (
+      <div className="loading-container">
+        <LoadingSpinner />
+        <p>Loading your dashboard...</p>
+      </div>
+    );
+  }
+  if (projectsError) {
+    return <ErrorMessage message={projectsError} />;
+  }
+
+  return (
+    <div className="dashboard">
+      <div className="container">
+        <header className="dashboard-header">
+          <div>
+            <h1>Welcome back, {user?.username}!</h1>
+            <p>Ready to continue your writing journey?</p>
+          </div>
+          <button onClick={handleLogout} className="logout-button">Sign Out</button>
+        </header>
+
+        {/* Backend dashboard API message and account info */}
+        <div>
+          <p>{dashboardData?.message}</p>
+          {dashboardData?.user && (
+            <p>Member since: {dashboardData.user.member_since}</p>
+          )}
+        </div>
+
+        {/* Analytics Section */}
+        <section className="analytics-section">
+          <h2>Your Writing Analytics</h2>
+          <div className="stats-grid">
+            <div className="stat-card"><h3>{stats.totalProjects}</h3><p>Total Projects</p></div>
+            <div className="stat-card"><h3>{stats.totalWords.toLocaleString()}</h3><p>Total Words Written</p></div>
+            <div className="stat-card"><h3>{stats.averageWordsPerProject.toLocaleString()}</h3><p>Average Words per Project</p></div>
+            <div className="stat-card"><h3>{new Date(stats.lastUpdated).toLocaleDateString()}</h3><p>Last Updated</p></div>
+          </div>
+        </section>
+
+        {/* Recent Projects Section */}
+        <section className="recent-projects">
+          <h2>Recent Projects</h2>
+          {projects.length === 0 ? (
+            <div className="empty-state">
+              <p>No projects yet. Create your first story project!</p>
+              <Link to="/projects" className="btn-primary">Create Project</Link>
+            </div>
+          ) : (
+            <ProjectList
+              projects={projects.slice(0, 5)}
+              isLoading={projectsLoading}
+              showCreateButton={false}
+              onProjectSelect={id => navigate(`/projects/${id}`)}
+              // Provide dummy or real implementations for other required props
+              onProjectEdit={() => {}}
+              onProjectDelete={() => {}}
+            />
+          )}
+        </section>
+      </div>
+    </div>
+  );
+};
+
+export default Dashboard;
+
+================================================================================
+## FILE: frontend/src\pages\HomePage.tsx
+
+// frontend/src/pages/HomePage.tsx
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+
+const HomePage: React.FC = () => {
+  const { user } = useAuth();
+
+  return (
+    <div className="home-page">
+      <header className="hero-section">
+        <div className="container">
+          <h1>Fiction Platform</h1>
+          <p className="hero-subtitle">
+            Empower your creative journey with comprehensive writing tools
+          </p>
+          <p className="hero-description">
+            A free, open-source platform designed for fiction writers of all levels. 
+            Plan, create, edit, and organize your stories with ease.
+          </p>
+          {user ? (
+            <Link to="/dashboard" className="cta-button">
+              Go to Dashboard
+            </Link>
+          ) : (
+            <div className="cta-buttons">
+              <Link to="/register" className="cta-button primary">
+                Get Started Free
+              </Link>
+              <Link to="/login" className="cta-button secondary">
+                Sign In
+              </Link>
+            </div>
+          )}
+        </div>
+      </header>
+      {/* Additional features and sections can be included here */}
+    </div>
+  );
+};
+
+export default HomePage;
+
+
+================================================================================
+## FILE: frontend/src\pages\ProjectEditorPage.css
+
+/* ProjectEditorPage.css - Enhanced styling for the project editor */
+.project-editor {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f8f9fa;
+}
+
+.editor-header {
+  background: white;
+  padding: 15px 25px;
+  border-bottom: 1px solid #e1e5e9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.editor-info {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-weight: 500;
+}
+
+.word-count {
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.auto-save-status {
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.auto-save-status.saving {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.auto-save-status.saved {
+  background-color: #d1edff;
+  color: #0c5460;
+}
+
+.auto-save-status.error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.editor-content {
+  flex: 1;
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+}
+
+.project-meta {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e1e5e9;
+}
+
+.title-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+.title-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.description-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-family: inherit;
+  resize: vertical;
+  color: #495057;
+}
+
+.description-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.story-editor {
+  flex: 1;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e1e5e9;
+  display: flex;
+}
+
+.story-textarea {
+  flex: 1;
+  padding: 25px;
+  border: none;
+  resize: none;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  color: #2c3e50;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.story-textarea:focus {
+  outline: none;
+}
+
+.story-textarea::placeholder {
+  color: #adb5bd;
+  font-style: italic;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .editor-header {
+    padding: 10px 15px;
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+
+  .editor-info {
+    order: -1;
+  }
+
+  .editor-content {
+    padding: 15px;
+  }
+
+  .story-textarea {
+    padding: 15px;
+    font-size: 1rem;
+  }
+}

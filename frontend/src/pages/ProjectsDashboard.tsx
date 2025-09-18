@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjects } from '../hooks/useProjects';
-import { ProjectFilters, Project } from '../types/project-types';
+import { Project } from '../types/project-types';
 import ProjectList from '../components/projects/ProjectList';
 import CreateProjectForm from '../components/projects/CreateProjectForm';
 import DeleteProjectModal from '../components/projects/DeleteProjectModal';
@@ -14,14 +14,10 @@ const ProjectsDashboard: React.FC = () => {
     projects,
     isLoading,
     error,
-    filters,
     pagination,
     createProject,
-    updateProject,
     deleteProject,
-    setFilters,
     setPage,
-    refreshProjects,
     clearError
   } = useProjects();
 
@@ -47,7 +43,8 @@ const ProjectsDashboard: React.FC = () => {
     navigate(`/projects/${project.id}/settings`);
   };
 
-  const handleProjectDelete = (project: Project) => {
+  const handleProjectDelete = (projectId: number) => {
+    const project = projects.find(p => p.id === projectId) || null;
     setProjectToDelete(project);
   };
 
@@ -60,9 +57,6 @@ const ProjectsDashboard: React.FC = () => {
     }
   };
 
-  const handleFiltersChange = (newFilters: ProjectFilters) => {
-    setFilters(newFilters);
-  };
 
   return (
     <div className="projects-dashboard">
@@ -93,8 +87,6 @@ const ProjectsDashboard: React.FC = () => {
           onProjectSelect={handleProjectSelect}
           onProjectEdit={handleProjectEdit}
           onProjectDelete={handleProjectDelete}
-          filters={filters}
-          onFiltersChange={handleFiltersChange}
         />
 
         {pagination.pages > 1 && (

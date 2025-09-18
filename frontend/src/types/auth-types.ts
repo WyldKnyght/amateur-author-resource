@@ -1,3 +1,4 @@
+// frontend/src/types/auth-types.ts
 export interface User {
   id: number;
   username: string;
@@ -24,4 +25,6 @@ export interface AuthContextType {
   register: (username: string, email: string, password: string) => Promise<boolean>;
   logout: () => void;
   isLoading: boolean;
+  authError: string;
+  clearAuthError: () => void;
 }

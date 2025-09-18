@@ -1,0 +1,873 @@
+
+================================================================================
+## FILE: frontend/src\pages\ProjectEditorPage.tsx
+
+// frontend/src/pages/ProjectEditorPage.tsx
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useProject } from '../hooks/useProjects';
+import { useStoryContent, useContentVersions } from '../hooks/useStoryContent';
+import { useProjectStats } from '../hooks/useProjects';
+import LoadingSpinner from '../components/common/LoadingSpinner';
+import ErrorMessage from '../components/common/ErrorMessage';
+import './ProjectEditorPage.css';
+
+const ProjectEditorPage: React.FC = () => {
+  const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const numericProjectId = parseInt(projectId || '0', 10);
+
+  const { project, isLoading: projectLoading, error: projectError } = useProject(numericProjectId);
+  const { stats } = useProjectStats(numericProjectId);
+  const {
+    content,
+    isLoading: contentLoading,
+    isSaving,
+    isAutoSaving,
+    hasUnsavedChanges,
+    lastSaved,
+    error: contentError,
+    updateContent,
+    saveContent: forceSave,
+    createVersion,
+  } = useStoryContent(numericProjectId);
+
+  const { versions, refreshVersions } = useContentVersions(numericProjectId);
+
+  const [showVersions, setShowVersions] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [storyText, setStoryText] = useState('');
+
+  const isLoading = projectLoading || contentLoading;
+  const error = projectError || contentError;
+
+  useEffect(() => {
+    if (!projectId || isNaN(numericProjectId)) {
+      navigate('/projects');
+    }
+  }, [projectId, numericProjectId, navigate]);
+  
+  useEffect(() => {
+    if (content?.content !== undefined) {
+      setStoryText(content.content);
+    }
+  }, [content]);
+
+  useEffect(() => {
+    updateContent(storyText);
+  }, [storyText, updateContent]);
+
+  // Manual save with Ctrl+S
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (hasUnsavedChanges) {
+          forceSave();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [forceSave, hasUnsavedChanges]);
+
+  const handleBackToDashboard = () => {
+    if (hasUnsavedChanges) {
+      const confirmLeave = window.confirm('You have unsaved changes. Are you sure you want to leave?');
+      if (!confirmLeave) {
+        return;
+      }
+    }
+    navigate('/projects');
+  };
+
+  const handleSaveAndCreateVersion = async () => {
+    const saveSuccess = await forceSave();
+    if (saveSuccess) {
+      const versionSuccess = await createVersion();
+      if (versionSuccess) {
+        refreshVersions();
+        alert('Version created successfully!');
+      }
+    }
+  };
+
+  const formatLastSaved = (timestamp?: string) => {
+    if (!timestamp) {
+      return 'Never';
+    }
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString();
+  };
+
+  const getStatusIndicator = () => {
+    if (isSaving) {
+      return { text: 'Saving...', class: 'saving' };
+    }
+    if (isAutoSaving) {
+      return { text: 'Auto-saving...', class: 'auto-saving' };
+    }
+    if (hasUnsavedChanges) {
+      return { text: 'Unsaved changes', class: 'unsaved' };
+    }
+    return { text: 'All changes saved', class: 'saved' };
+  };
+
+  const statusIndicator = getStatusIndicator();
+
+  if (isLoading) {
+    return (
+      <div className="editor-loading">
+        <LoadingSpinner />
+        <p>Loading project...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="editor-error">
+        <ErrorMessage message={error} />
+        <button onClick={handleBackToDashboard} className="btn btn-secondary">
+          Back to Projects
+        </button>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="editor-error">
+        <ErrorMessage message="Project not found" />
+        <button onClick={handleBackToDashboard} className="btn btn-secondary">
+          Back to Projects
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="project-editor-page">
+      {/* Editor Toolbar */}
+      <div className="editor-toolbar">
+        <div className="toolbar-left">
+          <button
+            onClick={handleBackToDashboard}
+            className="btn btn-secondary btn-sm"
+            title="Back to Projects"
+          >
+            ← Back
+          </button>
+          <h2 className="project-title">{project.title}</h2>
+        </div>
+
+        <div className="toolbar-center">
+          <div className={`save-status ${statusIndicator.class}`}>
+            <span className="status-dot"></span>
+            {statusIndicator.text}
+            {lastSaved && (
+              <small className="last-saved">
+                Last saved: {formatLastSaved(lastSaved)}
+              </small>
+            )}
+          </div>
+          {stats && <div className="word-count-display">{stats.word_count.toLocaleString()} words</div>}
+        </div>
+
+        <div className="toolbar-right">
+          <button
+            onClick={() => setShowStats(!showStats)}
+            className="btn btn-outline btn-sm"
+            title="Toggle Statistics"
+          >
+            Stats
+          </button>
+
+          <button
+            onClick={() => setShowVersions(!showVersions)}
+            className="btn btn-outline btn-sm"
+            title="Version History"
+          >
+            Versions
+          </button>
+
+          <button
+            onClick={handleSaveAndCreateVersion}
+            className="btn btn-secondary btn-sm"
+            disabled={isSaving}
+            title="Save and Create Version"
+          >
+            Save Version
+          </button>
+
+          <button
+            onClick={() => forceSave()}
+            className="btn btn-primary btn-sm"
+            disabled={isSaving || (!hasUnsavedChanges && !isAutoSaving)}
+            title="Save Now (Ctrl+S)"
+          >
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+
+      <div className="editor-main">
+        {/* Side Panel */}
+        {(showStats || showVersions) && (
+          <div className="editor-sidebar">
+            {showStats && stats && (
+              <div className="stats-panel">
+                <h3>Statistics</h3>
+                <div className="stat-item">
+                  <label>Word Count:</label>
+                  <span>{stats.word_count.toLocaleString()}</span>
+                </div>
+                {stats.target_word_count && (
+                  <div className="stat-item">
+                    <label>Target:</label>
+                    <span>{stats.target_word_count.toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="stat-item">
+                  <label>Characters:</label>
+                  <span>{stats.character_count.toLocaleString()}</span>
+                </div>
+                {stats.progress_percentage > 0 && (
+                  <div className="stat-item">
+                    <label>Progress:</label>
+                    <div className="progress-bar">
+                      <div
+                        className="progress-fill"
+                        style={{ width: `${Math.min(100, stats.progress_percentage)}%` }}
+                      ></div>
+                      <span className="progress-text">
+                        {Math.round(stats.progress_percentage)}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <div className="stat-item">
+                  <label>Days Active:</label>
+                  <span>{stats.days_since_creation}</span>
+                </div>
+              </div>
+            )}
+
+            {showVersions && (
+              <div className="versions-panel">
+                <h3>Version History</h3>
+                <div className="versions-list">
+                  {versions.map((version) => (
+                    <div
+                      key={version.id}
+                      className={`version-item ${version.is_active ? 'active' : ''}`}
+                    >
+                      <div className="version-info">
+                        <strong>Version {version.version}</strong>
+                        {version.is_active && <span className="active-badge">Current</span>}
+                        <small>{new Date(version.created_at).toLocaleDateString()}</small>
+                      </div>
+                      <div className="version-meta">
+                        <span className="save-reason">{version.save_reason}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Main Editor */}
+        <div className="editor-content-wrapper">
+          <textarea
+            value={storyText}
+            onChange={(e) => setStoryText(e.target.value)}
+            placeholder="Start writing your story..."
+            className="story-textarea"
+            disabled={isLoading}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ProjectEditorPage;
+================================================================================
+## FILE: frontend/src\pages\ProjectsDashboard.css
+
+/* Projects Dashboard styles placeholder */
+
+================================================================================
+## FILE: frontend/src\pages\ProjectsDashboard.tsx
+
+// frontend/src/pages/ProjectsDashboard.tsx
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useProjects } from '../hooks/useProjects';
+import { Project } from '../types/project-types';
+import ProjectList from '../components/projects/ProjectList';
+import CreateProjectForm from '../components/projects/CreateProjectForm';
+import DeleteProjectModal from '../components/projects/DeleteProjectModal';
+import './ProjectsDashboard.css';
+
+const ProjectsDashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const {
+    projects,
+    isLoading,
+    error,
+    pagination,
+    createProject,
+    deleteProject,
+    setPage,
+    clearError
+  } = useProjects();
+
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+
+  const handleCreateProject = () => {
+    setShowCreateForm(true);
+  };
+
+  const handleProjectCreated = async (projectData: any) => {
+    const newProject = await createProject(projectData);
+    if (newProject) {
+      setShowCreateForm(false);
+    }
+  };
+
+  const handleProjectSelect = (projectId: number) => {
+    navigate(`/projects/${projectId}/editor`);
+  };
+
+  const handleProjectEdit = (project: Project) => {
+    navigate(`/projects/${project.id}/settings`);
+  };
+
+  const handleProjectDelete = (projectId: number) => {
+    const project = projects.find(p => p.id === projectId) || null;
+    setProjectToDelete(project);
+  };
+
+  const confirmDelete = async () => {
+    if (projectToDelete) {
+      const success = await deleteProject(projectToDelete.id);
+      if (success) {
+        setProjectToDelete(null);
+      }
+    }
+  };
+
+
+  return (
+    <div className="projects-dashboard">
+      <div className="dashboard-header">
+        <div className="header-content">
+          <h1>My Writing Projects</h1>
+          <button 
+            className="btn btn-primary"
+            onClick={handleCreateProject}
+          >
+            + New Project
+          </button>
+        </div>
+      </div>
+
+      <div className="dashboard-content">
+        {error && (
+          <div className="error-alert">
+            <span>{error}</span>
+            <button onClick={clearError} className="close-btn">×</button>
+          </div>
+        )}
+
+        <ProjectList
+          projects={projects}
+          isLoading={isLoading}
+          onCreateNew={handleCreateProject}
+          onProjectSelect={handleProjectSelect}
+          onProjectEdit={handleProjectEdit}
+          onProjectDelete={handleProjectDelete}
+        />
+
+        {pagination.pages > 1 && (
+          <div className="pagination">
+            {Array.from({ length: pagination.pages }, (_, i) => i + 1).map(page => (
+              <button
+                key={page}
+                className={`page-btn ${pagination.page === page ? 'active' : ''}`}
+                onClick={() => setPage(page)}
+              >
+                {page}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Create Project Modal */}
+      {showCreateForm && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <CreateProjectForm
+              onSubmit={handleProjectCreated}
+              onCancel={() => setShowCreateForm(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {projectToDelete && (
+        <DeleteProjectModal
+          project={projectToDelete}
+          onConfirm={confirmDelete}
+          onCancel={() => setProjectToDelete(null)}
+        />
+      )}
+    </div>
+  );
+};
+
+export default ProjectsDashboard;
+================================================================================
+## FILE: frontend/src\pages\RegisterPage.tsx
+
+// frontend/src/pages/RegisterPage.tsx
+import React from 'react';
+import RegisterForm from '../components/auth/RegisterForm';
+
+const RegisterPage: React.FC = () => (
+  <div className="register-page">
+    <RegisterForm />
+  </div>
+);
+
+export default RegisterPage;
+
+================================================================================
+## FILE: frontend/src\services\project-api.ts
+
+import axios from 'axios';
+import {
+  Project,
+  ProjectCreate,
+  ProjectUpdate,
+  ProjectWithContent,
+  ProjectListResponse,
+  ProjectStats,
+  ProjectBackup,
+  ProjectFilters,
+  StoryContent,
+  StoryContentUpdate,
+} from '../types/project-types';
+
+// Get the API base URL from environment or default
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+// Create axios instance with default config (only once!)
+const apiClient = axios.create({
+  baseURL: `${API_BASE_URL}/api`,
+  headers: { 'Content-Type': 'application/json' }
+});
+
+// Add auth token to requests
+apiClient.interceptors.request.use(config => {
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Handle response errors globally
+apiClient.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('access_token');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+export const projectAPI = {
+  async getProjects(filters: ProjectFilters = {}): Promise<ProjectListResponse> {
+    const params = new URLSearchParams();
+    if (filters.skip !== undefined) {
+      params.append('skip', filters.skip.toString());
+    }
+    if (filters.limit !== undefined) {
+      params.append('limit', filters.limit.toString());
+    }
+    if (filters.status) {
+      params.append('status', filters.status);
+    }
+    if (filters.genre) {
+      params.append('genre', filters.genre);
+    }
+    if (filters.search) {
+      params.append('search', filters.search);
+    }
+    const response = await apiClient.get<ProjectListResponse>(`/projects?${params.toString()}`);
+    return response.data;
+  },
+  async getProject(projectId: number): Promise<ProjectWithContent> {
+    const response = await apiClient.get<ProjectWithContent>(`/projects/${projectId}`);
+    return response.data;
+  },
+  async createProject(projectData: ProjectCreate): Promise<Project> {
+    const response = await apiClient.post<Project>('/projects', projectData);
+    return response.data;
+  },
+  async updateProject(projectId: number, projectData: ProjectUpdate): Promise<Project> {
+    const response = await apiClient.put<Project>(`/projects/${projectId}`, projectData);
+    return response.data;
+  },
+  async deleteProject(projectId: number): Promise<{ message: string }> {
+    const response = await apiClient.delete<{ message: string }>(`/projects/${projectId}`);
+    return response.data;
+  },
+  async getProjectStats(projectId: number): Promise<ProjectStats> {
+    const response = await apiClient.get<ProjectStats>(`/projects/${projectId}/stats`);
+    return response.data;
+  },
+  async getStoryContent(projectId: number): Promise<StoryContent> {
+    const response = await apiClient.get<StoryContent>(`/stories/${projectId}/content`);
+    return response.data;
+  },
+  async saveStoryContent(projectId: number, contentData: StoryContentUpdate): Promise<StoryContent> {
+    const response = await apiClient.put<StoryContent>(`/stories/${projectId}/content`, contentData);
+    return response.data;
+  },
+  async autoSaveStoryContent(projectId: number, content: string): Promise<{ message: string }> {
+    const response = await apiClient.post<{ message: string }>(`/stories/${projectId}/auto-save`, {
+      content,
+      auto_saved: true,
+      save_reason: 'auto_save',
+    });
+    return response.data;
+  },
+  async createContentVersion(projectId: number): Promise<StoryContent> {
+    const response = await apiClient.post<StoryContent>(`/stories/${projectId}/content/version`);
+    return response.data;
+  },
+  async getContentVersions(projectId: number): Promise<StoryContent[]> {
+    const response = await apiClient.get<StoryContent[]>(`/stories/${projectId}/content/versions`);
+    return response.data;
+  },
+  async restoreContentVersion(projectId: number, version: number): Promise<{ message: string }> {
+    const response = await apiClient.post<{ message: string }>(`/stories/${projectId}/content/restore/${version}`);
+    return response.data;
+  },
+  async backupContent(projectId: number): Promise<ProjectBackup> {
+    const response = await apiClient.get<ProjectBackup>(`/stories/${projectId}/content/backup`);
+    return response.data;
+  }
+};
+
+export default projectAPI;
+
+// Utility functions for error handling
+export const handleApiError = (error: any): string => {
+  if (error.response?.data?.detail) {
+    return error.response.data.detail;
+  }
+  if (error.message) {
+    return error.message;
+  }
+  return 'An unexpected error occurred';
+};
+
+// Auto-save utility class
+export class AutoSaveManager {
+  private timeoutId: ReturnType<typeof setTimeout> | null = null;
+  private readonly projectId: number;
+  private readonly delay: number;
+
+  constructor(projectId: number, delay: number = 3000) {
+    this.projectId = projectId;
+    this.delay = delay;
+  }
+
+  scheduleAutoSave(content: string, callback?: () => void): void {
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+    }
+    this.timeoutId = setTimeout(async () => {
+      try {
+        await projectAPI.autoSaveStoryContent(this.projectId, content);
+        callback?.();
+      } catch (error) {
+        console.error('Auto-save failed:', error);
+      }
+    }, this.delay);
+  }
+
+  cancel(): void {
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+  }
+
+  destroy(): void {
+    this.cancel();
+  }
+}
+
+================================================================================
+## FILE: frontend/src\types\auth-types.ts
+
+// frontend/src/types/auth-types.ts
+export interface User {
+  id: number;
+  username: string;
+  email: string;
+  created_at: string;
+  is_active: boolean;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+}
+
+export interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
+  login: (username: string, password: string) => Promise<boolean>;
+  register: (username: string, email: string, password: string) => Promise<boolean>;
+  logout: () => void;
+  isLoading: boolean;
+  authError: string;
+  clearAuthError: () => void;
+}
+
+================================================================================
+## FILE: frontend/src\types\project-types.ts
+
+// frontend/src/types/project-types.ts
+export interface Project {
+  id: number;
+  title: string;
+  description?: string;
+  genre?: string;
+  status: ProjectStatus;
+  is_private: boolean;
+  word_count: number;
+  target_word_count?: number;
+  user_id: number;
+  created_at: string;
+  updated_at?: string;
+  last_edited_at?: string;
+}
+
+export interface ProjectCreate {
+  title: string;
+  description?: string;
+  genre?: string;
+  status?: ProjectStatus;
+  is_private?: boolean;
+  target_word_count?: number;
+}
+
+export interface ProjectUpdate {
+  title?: string;
+  description?: string;
+  genre?: string;
+  status?: ProjectStatus;
+  is_private?: boolean;
+  target_word_count?: number;
+}
+
+export interface ProjectWithContent extends Project {
+  content?: StoryContent;
+}
+
+export interface StoryContent {
+  id: number;
+  project_id: number;
+  content?: string;
+  content_type: ContentType;
+  version: number;
+  is_active: boolean;
+  auto_saved: boolean;
+  save_reason: SaveReason;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface StoryContentUpdate {
+  content?: string;
+  auto_saved?: boolean;
+  save_reason?: SaveReason;
+}
+
+export interface ProjectListResponse {
+  projects: Project[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+export interface ProjectStats {
+  project_id: number;
+  word_count: number;
+  target_word_count?: number;
+  character_count: number;
+  progress_percentage: number;
+  days_since_creation: number;
+  last_edited?: string;
+}
+
+export interface ProjectBackup {
+  project: {
+    id: number;
+    title: string;
+    description?: string;
+    genre?: string;
+    status: string;
+    created_at: string;
+    word_count: number;
+  };
+  content_versions: Array<{
+    version: number;
+    content?: string;
+    content_type: string;
+    is_active: boolean;
+    created_at: string;
+    save_reason: string;
+  }>;
+  backup_created_at: string;
+}
+
+// Enums
+export type ProjectStatus = 'draft' | 'in_progress' | 'completed' | 'published';
+
+export type ContentType = 'markdown' | 'html' | 'plain_text';
+
+export type SaveReason = 
+  | 'manual_save' 
+  | 'auto_save' 
+  | 'version_save' 
+  | 'initial_creation' 
+  | 'version_restore';
+
+// Filter and query types
+export interface ProjectFilters {
+  status?: ProjectStatus;
+  genre?: string;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+// UI State types
+export interface ProjectEditorState {
+  isLoading: boolean;
+  isSaving: boolean;
+  isAutoSaving: boolean;
+  hasUnsavedChanges: boolean;
+  lastSaved?: string;
+  error?: string;
+  content: StoryContent | null;
+}
+
+export interface ProjectListState {
+  projects: Project[];
+  isLoading: boolean;
+  error?: string;
+  filters: ProjectFilters;
+  pagination: {
+    page: number;
+    size: number;
+    total: number;
+    pages: number;
+  };
+}
+
+// Form validation types
+export interface ProjectFormErrors {
+  title?: string;
+  description?: string;
+  genre?: string;
+  target_word_count?: string;
+}
+
+// Genre options for dropdowns
+export const GENRE_OPTIONS = [
+  'Fiction',
+  'Non-Fiction',
+  'Romance',
+  'Mystery',
+  'Fantasy',
+  'Science Fiction',
+  'Thriller',
+  'Horror',
+  'Adventure',
+  'Young Adult',
+  'Children\'s',
+  'Biography',
+  'Memoir',
+  'Self-Help',
+  'Business',
+  'Poetry',
+  'Other'
+] as const;
+
+// Status options
+export const STATUS_OPTIONS: { value: ProjectStatus; label: string; color: string }[] = [
+  { value: 'draft', label: 'Draft', color: 'gray' },
+  { value: 'in_progress', label: 'In Progress', color: 'blue' },
+  { value: 'completed', label: 'Completed', color: 'green' },
+  { value: 'published', label: 'Published', color: 'purple' }
+];
+
+// API Response types
+export interface ApiError {
+  detail: string;
+}
+
+export interface ApiResponse<T> {
+  data?: T;
+  error?: ApiError;
+}
+
+// Component Props types
+export interface ProjectCardProps {
+  project: Project;
+  onEdit: (project: Project) => void;
+  onDelete: (projectId: number) => void;
+  onOpen: (projectId: number) => void;
+}
+
+export interface ProjectListProps {
+  projects: Project[];
+  isLoading: boolean;
+  onCreateNew: () => void;
+  onProjectSelect: (projectId: number) => void;
+  onProjectEdit: (project: Project) => void;
+  onProjectDelete: (projectId: number) => void;
+  filters: ProjectFilters;
+  onFiltersChange: (filters: ProjectFilters) => void;
+}
+
+export interface ProjectEditorProps {
+  projectId: number;
+  onSave: (content: string) => void;
+  onAutoSave: (content: string) => void;
+  autoSaveInterval?: number; // in milliseconds
+}

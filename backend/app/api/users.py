@@ -1,3 +1,4 @@
+# backend/app/api/users.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from app.core.database import get_session
@@ -26,26 +27,23 @@ def update_user_profile(
 ):
     """Update current user's profile"""
     if user_update.email:
-        # Check if email is already taken by another user
-        existing_email = db.exec(
+        if existing_email := db.exec(
             select(User).where(
-                User.email == user_update.email,
-                User.id != current_user.id
+                User.email == user_update.email, User.id != current_user.id
             )
-        ).first()
-        if existing_email:
+        ).first():
             raise HTTPException(status_code=400, detail="Email already taken")
         current_user.email = user_update.email
-    
+
     if user_update.password:
         if len(user_update.password) < 8:
             raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
         current_user.password_hash = hash_password(user_update.password)
-    
+
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
-    
+
     return {"message": "Profile updated successfully"}
 
 @router.get("/dashboard")

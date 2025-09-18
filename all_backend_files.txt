@@ -1,0 +1,921 @@
+
+================================================================================
+## FILE: backend/app\main.py
+
+# backend/app/main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.database import create_db_and_tables
+from app.api.auth import router as auth_router
+from app.api.users import router as users_router
+from .api import projects, stories
+
+app = FastAPI(
+    title="Fiction Platform API",
+    description="A comprehensive platform for fiction writers",
+    version="1.0.0"
+)
+
+# Register routers AFTER app is created
+app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
+app.include_router(stories.router, prefix="/api/stories", tags=["stories"])
+app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
+app.include_router(users_router, prefix="/api/users", tags=["users"])
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Create database tables on startup
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
+
+@app.get("/")
+def read_root():
+    return {"message": "Fiction Platform API - Ready to help writers create amazing stories!"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "message": "Fiction Platform API is running"}
+
+================================================================================
+## FILE: backend/app\__init__.py
+
+# backend/app/__init__.py
+
+================================================================================
+## FILE: backend/app\api\auth.py
+
+# backend/app/api/auth.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+from app.core.database import get_session
+from app.core.security import hash_password, verify_password, create_access_token
+from app.core.deps import get_current_user
+from app.models.user import User, UserCreate, UserLogin
+
+router = APIRouter()
+
+@router.post("/register")
+def register(user_data: UserCreate, db: Session = Depends(get_session)):
+    if db.exec(select(User).where(User.username == user_data.username)).first():
+        raise HTTPException(status_code=400, detail="Username already exists")
+    if db.exec(select(User).where(User.email == user_data.email)).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    hashed_password = hash_password(user_data.password)
+    user = User(
+        username=user_data.username,
+        email=user_data.email,
+        password_hash=hashed_password
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "username": user.username, "email": user.email, "created_at": user.created_at}
+
+@router.post("/login")
+def login(user_data: UserLogin, db: Session = Depends(get_session)):
+    user = db.exec(select(User).where(User.username == user_data.username)).first()
+    if not user or not verify_password(user_data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    access_token = create_access_token(subject=str(user.id))
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "created_at": user.created_at
+        }
+    }
+
+@router.get("/me")
+def get_current_user_info(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "created_at": current_user.created_at,
+        "is_active": current_user.is_active
+    }
+
+================================================================================
+## FILE: backend/app\api\projects.py
+
+# backend/app/api/projects.py
+from datetime import timezone
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session, select
+from datetime import datetime
+
+from ..core.database import get_session
+from ..core.deps import get_current_user
+from ..models.user import User
+from ..models.project import Project
+from ..models.story_content import StoryContent
+from ..schemas.project import (
+    ProjectCreate,
+    ProjectUpdate,
+    ProjectResponse,
+    ProjectListResponse,
+    ProjectWithContent,
+)
+
+router = APIRouter()
+
+def get_user_project(
+    project_id: int,
+    current_user: User,
+    db: Session
+) -> Project:
+    statement = select(Project).where(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    )
+    if project := db.exec(statement).first():
+        return project
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found or access denied"
+        )
+
+def update_word_count(project: Project, db: Session):
+    statement = select(StoryContent).where(
+        (StoryContent.project_id == project.id) & (StoryContent.is_active == True)
+    )
+    active_content = db.exec(statement).first()
+    if active_content and active_content.content:
+        word_count = len(active_content.content.split())
+        project.word_count = word_count
+        project.last_edited_at = datetime.now(timezone.utc)
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+
+@router.get("/", response_model=ProjectListResponse)
+def list_projects(
+    skip: int = Query(0, ge=0, description="Number of projects to skip"),
+    limit: int = Query(10, ge=1, le=100, description="Number of projects to return"),
+    status: Optional[str] = Query(None, description="Filter by project status"),
+    genre: Optional[str] = Query(None, description="Filter by genre"),
+    search: Optional[str] = Query(None, description="Search in title and description"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    statement = select(Project).where(Project.user_id == current_user.id)
+    if status:
+        statement = statement.where(Project.status == status)
+    if genre:
+        statement = statement.where(Project.genre == genre)
+    if search:
+        statement = statement.where(
+            (Project.title.ilike(f"%{search}%")) |
+            (Project.description.ilike(f"%{search}%"))
+        )
+    projects = db.exec(statement).all()
+    total = len(projects)
+    page_projects = projects[skip:skip+limit]
+    pages = (total + limit - 1) // limit if total > 0 else 1
+
+    return ProjectListResponse(
+        projects=page_projects,
+        total=total,
+        page=(skip // limit) + 1,
+        size=len(page_projects),
+        pages=pages
+    )
+
+@router.post("/", response_model=ProjectResponse)
+def create_project(
+    project_data: ProjectCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    db_project = Project(
+        **project_data.dict(),
+        user_id=current_user.id
+    )
+    db.add(db_project)
+    db.commit()
+    db.refresh(db_project)
+
+    initial_content = StoryContent(
+        project_id=db_project.id,
+        content="",
+        version=1,
+        is_active=True,
+        save_reason="initial_creation"
+    )
+    db.add(initial_content)
+    db.commit()
+    db.refresh(initial_content)
+
+    return db_project
+
+@router.get("/{project_id}", response_model=ProjectWithContent)
+def get_project(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    project = get_user_project(project_id, current_user, db)
+    statement = select(StoryContent).where(
+        (StoryContent.project_id == project_id) & (StoryContent.is_active == True)
+    )
+    active_content = db.exec(statement).first()
+    response_data = ProjectWithContent.model_validate(project)
+    response_data.content = active_content
+    return response_data
+
+@router.put("/{project_id}", response_model=ProjectResponse)
+def update_project(
+    project_id: int,
+    project_data: ProjectUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    project = get_user_project(project_id, current_user, db)
+    update_data = project_data.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(project, field, value)
+
+    project.updated_at = datetime.now(timezone.utc)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+@router.delete("/{project_id}")
+def delete_project(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    project = get_user_project(project_id, current_user, db)
+    db.delete(project)
+    db.commit()
+    return {"message": "Project deleted successfully"}
+
+@router.get("/{project_id}/stats")
+def get_project_stats(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    project = get_user_project(project_id, current_user, db)
+    statement = select(StoryContent).where(
+        (StoryContent.project_id == project_id) & (StoryContent.is_active == True)
+    )
+    active_content = db.exec(statement).first()
+
+    stats = {
+        "project_id": project_id,
+        "word_count": project.word_count,
+        "target_word_count": project.target_word_count,
+        "character_count": (
+            len(active_content.content)
+            if active_content and active_content.content
+            else 0
+        ),
+        "progress_percentage": 0,
+        "days_since_creation": (
+            datetime.now(timezone.utc) - project.created_at
+        ).days,
+        "last_edited": (
+            project.last_edited_at.isoformat()
+            if project.last_edited_at
+            else None
+        ),
+    }
+
+    if project.target_word_count and project.target_word_count > 0:
+        stats["progress_percentage"] = min(100, (project.word_count / project.target_word_count) * 100)
+
+    return stats
+
+================================================================================
+## FILE: backend/app\api\stories.py
+
+# backend/app/api/stories.py
+from datetime import timezone
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from sqlmodel import Session, select, func
+from datetime import datetime
+
+from ..core.database import get_session
+from ..core.deps import get_current_user
+from ..models.user import User
+from ..models.project import Project
+from ..models.story_content import StoryContent
+from ..schemas.project import (
+    StoryContentCreate,
+    StoryContentUpdate,
+    StoryContentResponse,
+)
+from .projects import get_user_project, update_word_count
+
+router = APIRouter()
+
+async def auto_save_content(
+    project_id: int, 
+    content: str, 
+    user_id: int, 
+    db: Session
+):
+    try:
+        statement = select(StoryContent).where(
+            (StoryContent.project_id == project_id) &
+            (StoryContent.is_active == True)
+        )
+        if active_content := db.exec(statement).first():
+            active_content.content = content
+            active_content.auto_saved = True
+            active_content.save_reason = "auto_save"
+            active_content.updated_at = datetime.now(timezone.utc)
+            if project := db.exec(
+                select(Project).where(Project.id == project_id)
+            ).first():
+                word_count = len(content.split()) if content else 0
+                project.word_count = word_count
+                project.last_edited_at = datetime.now(timezone.utc)
+                db.add(project)
+            db.add(active_content)
+            db.commit()
+            db.refresh(active_content)
+    except Exception as e:
+        db.rollback()
+        print(f"Auto-save failed for project {project_id}: {e}")
+
+@router.get("/{project_id}/content", response_model=StoryContentResponse)
+def get_story_content(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    get_user_project(project_id, current_user, db)
+    statement = select(StoryContent).where(
+        (StoryContent.project_id == project_id) &
+        (StoryContent.is_active == True)
+    )
+    if content := db.exec(statement).first():
+        return content
+    else:
+        raise HTTPException(status_code=404, detail="Story content not found")
+
+@router.put("/{project_id}/content", response_model=StoryContentResponse)
+def save_story_content(
+    project_id: int,
+    content_data: StoryContentUpdate,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    project = get_user_project(project_id, current_user, db)
+    statement = select(StoryContent).where(
+        (StoryContent.project_id == project_id) &
+        (StoryContent.is_active == True)
+    )
+    active_content = db.exec(statement).first()
+    if not active_content:
+        active_content = StoryContent(
+            project_id=project_id,
+            content=content_data.content or "",
+            version=1,
+            is_active=True
+        )
+    else:
+        if content_data.content is not None:
+            active_content.content = content_data.content
+        if content_data.auto_saved is not None:
+            active_content.auto_saved = content_data.auto_saved
+        if content_data.save_reason is not None:
+            active_content.save_reason = content_data.save_reason
+        active_content.updated_at = datetime.now(timezone.utc)
+    db.add(active_content)
+    if content_data.content is not None:
+        word_count = len(content_data.content.split()) if content_data.content else 0
+        project.word_count = word_count
+        project.last_edited_at = datetime.now(timezone.utc)
+        project.updated_at = datetime.now(timezone.utc)
+        db.add(project)
+    db.commit()
+    db.refresh(active_content)
+    return active_content
+
+@router.post("/{project_id}/auto-save")
+def auto_save_story_content(
+    project_id: int,
+    content_data: StoryContentUpdate,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    get_user_project(project_id, current_user, db)
+    if content_data.content is not None:
+        background_tasks.add_task(
+            auto_save_content,
+            project_id,
+            content_data.content,
+            current_user.id,
+            db
+        )
+    return {"message": "Auto-save initiated"}
+
+@router.post("/{project_id}/content/version", response_model=StoryContentResponse)
+def create_content_version(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    get_user_project(project_id, current_user, db)
+    statement = select(StoryContent).where(
+        (StoryContent.project_id == project_id) &
+        (StoryContent.is_active == True)
+    )
+    current_content = db.exec(statement).first()
+    if not current_content:
+        raise HTTPException(status_code=404, detail="No content to version")
+    current_content.is_active = False
+    max_version_statement = select(func.max(StoryContent.version)).where(
+        StoryContent.project_id == project_id
+    )
+    max_version = db.exec(max_version_statement).one() or 0
+    new_version = StoryContent(
+        project_id=project_id,
+        content=current_content.content,
+        content_type=current_content.content_type,
+        version=(max_version + 1) if isinstance(max_version, int) else 1,
+        is_active=True,
+        save_reason="version_save"
+    )
+    db.add(new_version)
+    db.commit()
+    db.refresh(new_version)
+    return new_version
+
+@router.get("/{project_id}/content/versions", response_model=List[StoryContentResponse])
+def get_content_versions(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    get_user_project(project_id, current_user, db)
+    statement = select(StoryContent).where(
+        StoryContent.project_id == project_id
+    ).order_by(StoryContent.version.desc())
+    return db.exec(statement).all()
+
+@router.post("/{project_id}/content/restore/{version}")
+def restore_content_version(
+    project_id: int,
+    version: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    project = get_user_project(project_id, current_user, db)
+    statement_restore = select(StoryContent).where(
+        (StoryContent.project_id == project_id) &
+        (StoryContent.version == version)
+    )
+    version_to_restore = db.exec(statement_restore).first()
+    if not version_to_restore:
+        raise HTTPException(status_code=404, detail="Version not found")
+    statement_active = select(StoryContent).where(
+        (StoryContent.project_id == project_id) &
+        (StoryContent.is_active == True)
+    )
+    if current_active := db.exec(statement_active).first():
+        current_active.is_active = False
+        db.add(current_active)
+    restored_content = StoryContent(
+        project_id=project_id,
+        content=version_to_restore.content,
+        content_type=version_to_restore.content_type,
+        version=1,
+        is_active=True,
+        save_reason="version_restore"
+    )
+    db.add(restored_content)
+    update_word_count(project, db)
+    db.commit()
+    db.refresh(restored_content)
+    return {"message": f"Version {version} restored successfully"}
+
+@router.get("/{project_id}/content/backup")
+def backup_content(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    project = get_user_project(project_id, current_user, db)
+    statement_versions = select(StoryContent).where(
+        StoryContent.project_id == project_id
+    ).order_by(StoryContent.version.desc())
+    versions = db.exec(statement_versions).all()
+    return {
+        "project": {
+            "id": project.id,
+            "title": project.title,
+            "description": project.description,
+            "genre": project.genre,
+            "status": project.status,
+            "created_at": project.created_at.isoformat(),
+            "word_count": project.word_count,
+        },
+        "content_versions": [
+            {
+                "version": content.version,
+                "content": content.content,
+                "content_type": content.content_type,
+                "is_active": content.is_active,
+                "created_at": content.created_at.isoformat(),
+                "save_reason": content.save_reason,
+            }
+            for content in versions
+        ],
+        "backup_created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+================================================================================
+## FILE: backend/app\api\users.py
+
+# backend/app/api/users.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+from app.core.database import get_session
+from app.core.deps import get_current_user
+from app.models.user import User, UserRead, UserUpdate
+from app.core.security import hash_password
+
+router = APIRouter()
+
+@router.get("/profile", response_model=UserRead)
+def get_user_profile(current_user: User = Depends(get_current_user)):
+    """Get current user's profile"""
+    return UserRead(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        created_at=current_user.created_at,
+        is_active=current_user.is_active
+    )
+
+@router.put("/profile")
+def update_user_profile(
+    user_update: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    """Update current user's profile"""
+    if user_update.email:
+        if existing_email := db.exec(
+            select(User).where(
+                User.email == user_update.email, User.id != current_user.id
+            )
+        ).first():
+            raise HTTPException(status_code=400, detail="Email already taken")
+        current_user.email = user_update.email
+
+    if user_update.password:
+        if len(user_update.password) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+        current_user.password_hash = hash_password(user_update.password)
+
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+
+    return {"message": "Profile updated successfully"}
+
+@router.get("/dashboard")
+def get_user_dashboard(current_user: User = Depends(get_current_user)):
+    """Get user dashboard data"""
+    return {
+        "message": f"Welcome to your dashboard, {current_user.username}!",
+        "user": {
+            "id": current_user.id,
+            "username": current_user.username,
+            "email": current_user.email,
+            "member_since": current_user.created_at
+        },
+        "stats": {
+            "projects": 0,  # Will be implemented in Phase 2
+            "characters": 0,  # Will be implemented in Phase 2
+            "word_count": 0   # Will be implemented in Phase 2
+        }
+    }
+
+================================================================================
+## FILE: backend/app\api\__init__.py
+
+# backend/app/api/__init__.py
+
+================================================================================
+## FILE: backend/app\core\config.py
+
+# backend/app/core/config.py
+from decouple import config
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent  # Points to backend/app
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)  # Ensures the folder exists
+
+DATABASE_URL = f"sqlite:///{DATA_DIR / 'fiction_platform.db'}"
+class Settings:
+    PROJECT_NAME: str = "Fiction Platform API"
+    DATABASE_URL: str = config("DATABASE_URL", default=str(DATABASE_URL))
+    SECRET_KEY: str = config("SECRET_KEY", default="5!pc^6CRTb^kcfV%")
+    CORS_ORIGINS: str = config("CORS_ORIGINS", default="http://localhost:5173")
+
+
+settings = Settings()
+
+================================================================================
+## FILE: backend/app\core\database.py
+
+# backend/app/core/database.py
+
+from sqlmodel import SQLModel, Session, create_engine
+from app.core.config import settings
+from sqlmodel import create_engine
+
+DATABASE_URL = settings.DATABASE_URL
+engine = create_engine(DATABASE_URL, echo=True)
+
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+
+================================================================================
+## FILE: backend/app\core\deps.py
+
+# backend/app/core/deps.py
+from fastapi import Depends, HTTPException, status, Request
+from jose import jwt, JWTError
+from app.models.user import User
+from app.core.database import get_session
+from sqlmodel import Session, select
+from app.core.security import SECRET_KEY, ALGORITHM
+
+def get_token_from_header(request: Request):
+    auth: str = request.headers.get("Authorization")
+    if not auth or not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return auth[7:]
+
+def get_current_user(token: str = Depends(get_token_from_header), db: Session = Depends(get_session)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError as e:
+        raise credentials_exception from e
+    user = db.exec(select(User).where(User.id == int(user_id))).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+================================================================================
+## FILE: backend/app\core\security.py
+
+# backend/app/core/security.py
+from passlib.context import CryptContext
+from datetime import datetime, timedelta, timezone
+from jose import JWTError, jwt
+
+# JWT configuration
+SECRET_KEY = "your-secret"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 24 * 60  # 24 hours
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(subject: str, expires_delta: int = ACCESS_TOKEN_EXPIRE_MINUTES):
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_delta)
+    to_encode = {"exp": expire, "sub": subject}
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def decode_access_token(token: str):
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
+
+
+================================================================================
+## FILE: backend/app\core\__init__.py
+
+
+
+================================================================================
+## FILE: backend/app\models\project.py
+
+# backend/app/models/project.py
+from typing import Optional, List
+from sqlmodel import SQLModel, Field, Relationship
+from datetime import datetime
+
+class Project(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(index=True)
+    description: Optional[str] = Field(default=None)
+    genre: Optional[str] = Field(default=None)
+    status: str = Field(default="draft")
+    is_private: bool = Field(default=True)
+    word_count: int = Field(default=0)
+    target_word_count: Optional[int] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default=None)
+    last_edited_at: Optional[datetime] = Field(default=None)
+    user_id: int = Field(foreign_key="user.id", nullable=False)
+    user: Optional["User"] = Relationship(back_populates="projects")
+    story_content: List["StoryContent"] = Relationship(back_populates="project")
+
+================================================================================
+## FILE: backend/app\models\story_content.py
+
+# backend/app/models/story_content.py
+from typing import Optional, List
+from sqlmodel import SQLModel, Field, Relationship
+from datetime import datetime
+from .project import Project
+
+class StoryContent(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id")
+    content: Optional[str] = Field(default=None)
+    content_type: str = Field(default="markdown")
+    version: int = Field(default=1)
+    is_active: bool = Field(default=True)
+    auto_saved: bool = Field(default=False)
+    save_reason: str = Field(default="manual_save")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default=None)
+    project: Optional[Project] = Relationship(back_populates="story_content")
+
+================================================================================
+## FILE: backend/app\models\user.py
+
+# backend/app/models/user.py
+from sqlmodel import SQLModel, Field, Relationship
+from typing import Optional, List
+from datetime import datetime
+from pydantic import BaseModel
+from .project import Project
+
+# SQLModel User table (for database)
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True, min_length=3, max_length=50)
+    email: str = Field(index=True, unique=True, max_length=100)
+    password_hash: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_active: bool = Field(default=True)
+    projects: List[Project] = Relationship(back_populates="user")
+
+# Pydantic models for API/data validation
+
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserRead(BaseModel):
+    id: int
+    username: str
+    email: str
+    created_at: datetime
+    is_active: bool
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+
+================================================================================
+## FILE: backend/app\models\__init__.py
+
+# backend/app/models/__init__.py
+from sqlmodel import SQLModel
+
+================================================================================
+## FILE: backend/app\schemas\project.py
+
+# backend/app/schemas/project.py
+from datetime import datetime
+from typing import Optional, List
+from pydantic import BaseModel, Field, ConfigDict
+
+
+class ProjectBase(BaseModel):
+    """Base schema for Project model"""
+    title: str = Field(..., min_length=1, max_length=255, description="Project title")
+    description: Optional[str] = Field(None, max_length=1000, description="Project description")
+    genre: Optional[str] = Field(None, max_length=100, description="Story genre")
+    status: str = Field(default="draft", description="Project status")
+    is_private: bool = Field(default=True, description="Privacy setting")
+    target_word_count: Optional[int] = Field(None, ge=0, description="Target word count")
+
+
+class ProjectCreate(ProjectBase):
+    """Schema for creating a new project"""
+    pass
+
+
+class ProjectUpdate(BaseModel):
+    """Schema for updating an existing project"""
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=1000)
+    genre: Optional[str] = Field(None, max_length=100)
+    status: Optional[str] = None
+    is_private: Optional[bool] = None
+    target_word_count: Optional[int] = Field(None, ge=0)
+
+
+class ProjectResponse(ProjectBase):
+    """Schema for project response"""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: int
+    user_id: int
+    word_count: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+    last_edited_at: Optional[datetime]
+
+
+class ProjectListResponse(BaseModel):
+    """Schema for project list response"""
+    projects: List[ProjectResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+# Story Content Schemas
+class StoryContentBase(BaseModel):
+    """Base schema for StoryContent model"""
+    content: Optional[str] = Field(None, description="Story content")
+    content_type: str = Field(default="markdown", description="Content format type")
+
+
+class StoryContentCreate(StoryContentBase):
+    """Schema for creating story content"""
+    project_id: int
+
+
+class StoryContentUpdate(BaseModel):
+    """Schema for updating story content"""
+    content: Optional[str] = None
+    auto_saved: Optional[bool] = Field(default=False)
+    save_reason: Optional[str] = Field(default="manual_save")
+
+
+class StoryContentResponse(StoryContentBase):
+    """Schema for story content response"""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: int
+    project_id: int
+    version: int
+    is_active: bool
+    auto_saved: bool
+    save_reason: str
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+
+class ProjectWithContent(ProjectResponse):
+    """Extended project schema that includes content"""
+    content: Optional[StoryContentResponse] = None

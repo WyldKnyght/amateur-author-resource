@@ -1,13 +1,12 @@
-// frontend/src/pages/ProjectEditor.tsx
+// frontend/src/pages/ProjectEditorPage.tsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProject } from '../hooks/useProjects';
 import { useStoryContent, useContentVersions } from '../hooks/useStoryContent';
 import { useProjectStats } from '../hooks/useProjects';
-import ProjectEditorComponent from '../components/projects/ProjectEditor';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import ErrorMessage from '../components/common/ErrorMessage';
-import './ProjectEditor.css';
+import './ProjectEditorPage.css';
 
 const ProjectEditorPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -15,7 +14,7 @@ const ProjectEditorPage: React.FC = () => {
   const numericProjectId = parseInt(projectId || '0', 10);
 
   const { project, isLoading: projectLoading, error: projectError } = useProject(numericProjectId);
-  const { stats, refreshStats } = useProjectStats(numericProjectId);
+  const { stats } = useProjectStats(numericProjectId);
   const {
     content,
     isLoading: contentLoading,
@@ -25,16 +24,15 @@ const ProjectEditorPage: React.FC = () => {
     lastSaved,
     error: contentError,
     updateContent,
-    saveContent,
-    forceSave,
+    saveContent: forceSave,
     createVersion,
-    clearError
   } = useStoryContent(numericProjectId);
 
   const { versions, refreshVersions } = useContentVersions(numericProjectId);
-  
+
   const [showVersions, setShowVersions] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [storyText, setStoryText] = useState('');
 
   const isLoading = projectLoading || contentLoading;
   const error = projectError || contentError;
@@ -44,11 +42,38 @@ const ProjectEditorPage: React.FC = () => {
       navigate('/projects');
     }
   }, [projectId, numericProjectId, navigate]);
+  
+  useEffect(() => {
+    if (content?.content !== undefined) {
+      setStoryText(content.content);
+    }
+  }, [content]);
+
+  useEffect(() => {
+    updateContent(storyText);
+  }, [storyText, updateContent]);
+
+  // Manual save with Ctrl+S
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (hasUnsavedChanges) {
+          forceSave();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [forceSave, hasUnsavedChanges]);
 
   const handleBackToDashboard = () => {
     if (hasUnsavedChanges) {
       const confirmLeave = window.confirm('You have unsaved changes. Are you sure you want to leave?');
-      if (!confirmLeave) return;
+      if (!confirmLeave) {
+        return;
+      }
     }
     navigate('/projects');
   };
@@ -65,27 +90,23 @@ const ProjectEditorPage: React.FC = () => {
   };
 
   const formatLastSaved = (timestamp?: string) => {
-    if (!timestamp) return 'Never';
-    
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    
-    if (diff < 60000) { // Less than 1 minute
-      return 'Just now';
-    } else if (diff < 3600000) { // Less than 1 hour
-      return `${Math.floor(diff / 60000)} minutes ago`;
-    } else if (diff < 86400000) { // Less than 1 day
-      return `${Math.floor(diff / 3600000)} hours ago`;
-    } else {
-      return date.toLocaleDateString();
+    if (!timestamp) {
+      return 'Never';
     }
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString();
   };
 
   const getStatusIndicator = () => {
-    if (isSaving) return { text: 'Saving...', class: 'saving' };
-    if (isAutoSaving) return { text: 'Auto-saving...', class: 'auto-saving' };
-    if (hasUnsavedChanges) return { text: 'Unsaved changes', class: 'unsaved' };
+    if (isSaving) {
+      return { text: 'Saving...', class: 'saving' };
+    }
+    if (isAutoSaving) {
+      return { text: 'Auto-saving...', class: 'auto-saving' };
+    }
+    if (hasUnsavedChanges) {
+      return { text: 'Unsaved changes', class: 'unsaved' };
+    }
     return { text: 'All changes saved', class: 'saved' };
   };
 
@@ -127,7 +148,7 @@ const ProjectEditorPage: React.FC = () => {
       {/* Editor Toolbar */}
       <div className="editor-toolbar">
         <div className="toolbar-left">
-          <button 
+          <button
             onClick={handleBackToDashboard}
             className="btn btn-secondary btn-sm"
             title="Back to Projects"
@@ -147,6 +168,7 @@ const ProjectEditorPage: React.FC = () => {
               </small>
             )}
           </div>
+          {stats && <div className="word-count-display">{stats.word_count.toLocaleString()} words</div>}
         </div>
 
         <div className="toolbar-right">
@@ -157,7 +179,7 @@ const ProjectEditorPage: React.FC = () => {
           >
             Stats
           </button>
-          
+
           <button
             onClick={() => setShowVersions(!showVersions)}
             className="btn btn-outline btn-sm"
@@ -165,7 +187,7 @@ const ProjectEditorPage: React.FC = () => {
           >
             Versions
           </button>
-          
+
           <button
             onClick={handleSaveAndCreateVersion}
             className="btn btn-secondary btn-sm"
@@ -174,7 +196,7 @@ const ProjectEditorPage: React.FC = () => {
           >
             Save Version
           </button>
-          
+
           <button
             onClick={() => forceSave()}
             className="btn btn-primary btn-sm"
@@ -197,24 +219,21 @@ const ProjectEditorPage: React.FC = () => {
                   <label>Word Count:</label>
                   <span>{stats.word_count.toLocaleString()}</span>
                 </div>
-                
                 {stats.target_word_count && (
                   <div className="stat-item">
                     <label>Target:</label>
                     <span>{stats.target_word_count.toLocaleString()}</span>
                   </div>
                 )}
-                
                 <div className="stat-item">
                   <label>Characters:</label>
                   <span>{stats.character_count.toLocaleString()}</span>
                 </div>
-                
                 {stats.progress_percentage > 0 && (
                   <div className="stat-item">
                     <label>Progress:</label>
                     <div className="progress-bar">
-                      <div 
+                      <div
                         className="progress-fill"
                         style={{ width: `${Math.min(100, stats.progress_percentage)}%` }}
                       ></div>
@@ -224,7 +243,6 @@ const ProjectEditorPage: React.FC = () => {
                     </div>
                   </div>
                 )}
-                
                 <div className="stat-item">
                   <label>Days Active:</label>
                   <span>{stats.days_since_creation}</span>
@@ -237,7 +255,7 @@ const ProjectEditorPage: React.FC = () => {
                 <h3>Version History</h3>
                 <div className="versions-list">
                   {versions.map((version) => (
-                    <div 
+                    <div
                       key={version.id}
                       className={`version-item ${version.is_active ? 'active' : ''}`}
                     >
@@ -258,17 +276,13 @@ const ProjectEditorPage: React.FC = () => {
         )}
 
         {/* Main Editor */}
-        <div className="editor-content">
-          <ProjectEditorComponent
-            projectId={numericProjectId}
-            content={content}
-            onContentChange={updateContent}
-            isLoading={contentLoading}
-            isSaving={isSaving}
-            isAutoSaving={isAutoSaving}
-            hasUnsavedChanges={hasUnsavedChanges}
-            error={contentError}
-            onClearError={clearError}
+        <div className="editor-content-wrapper">
+          <textarea
+            value={storyText}
+            onChange={(e) => setStoryText(e.target.value)}
+            placeholder="Start writing your story..."
+            className="story-textarea"
+            disabled={isLoading}
           />
         </div>
       </div>

@@ -1,3 +1,5 @@
+# backend/app/api/stories.py
+from datetime import timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import Session, select, func
@@ -28,19 +30,17 @@ async def auto_save_content(
             (StoryContent.project_id == project_id) &
             (StoryContent.is_active == True)
         )
-        active_content = db.exec(statement).first()
-        if active_content:
+        if active_content := db.exec(statement).first():
             active_content.content = content
             active_content.auto_saved = True
             active_content.save_reason = "auto_save"
-            active_content.updated_at = datetime.utcnow()
-            project = db.exec(
+            active_content.updated_at = datetime.now(timezone.utc)
+            if project := db.exec(
                 select(Project).where(Project.id == project_id)
-            ).first()
-            if project:
+            ).first():
                 word_count = len(content.split()) if content else 0
                 project.word_count = word_count
-                project.last_edited_at = datetime.utcnow()
+                project.last_edited_at = datetime.now(timezone.utc)
                 db.add(project)
             db.add(active_content)
             db.commit()
@@ -60,10 +60,10 @@ def get_story_content(
         (StoryContent.project_id == project_id) &
         (StoryContent.is_active == True)
     )
-    content = db.exec(statement).first()
-    if not content:
+    if content := db.exec(statement).first():
+        return content
+    else:
         raise HTTPException(status_code=404, detail="Story content not found")
-    return content
 
 @router.put("/{project_id}/content", response_model=StoryContentResponse)
 def save_story_content(
@@ -86,7 +86,6 @@ def save_story_content(
             version=1,
             is_active=True
         )
-        db.add(active_content)
     else:
         if content_data.content is not None:
             active_content.content = content_data.content
@@ -94,13 +93,13 @@ def save_story_content(
             active_content.auto_saved = content_data.auto_saved
         if content_data.save_reason is not None:
             active_content.save_reason = content_data.save_reason
-        active_content.updated_at = datetime.utcnow()
-        db.add(active_content)
+        active_content.updated_at = datetime.now(timezone.utc)
+    db.add(active_content)
     if content_data.content is not None:
         word_count = len(content_data.content.split()) if content_data.content else 0
         project.word_count = word_count
-        project.last_edited_at = datetime.utcnow()
-        project.updated_at = datetime.utcnow()
+        project.last_edited_at = datetime.now(timezone.utc)
+        project.updated_at = datetime.now(timezone.utc)
         db.add(project)
     db.commit()
     db.refresh(active_content)
@@ -167,8 +166,7 @@ def get_content_versions(
     statement = select(StoryContent).where(
         StoryContent.project_id == project_id
     ).order_by(StoryContent.version.desc())
-    versions = db.exec(statement).all()
-    return versions
+    return db.exec(statement).all()
 
 @router.post("/{project_id}/content/restore/{version}")
 def restore_content_version(
@@ -189,8 +187,7 @@ def restore_content_version(
         (StoryContent.project_id == project_id) &
         (StoryContent.is_active == True)
     )
-    current_active = db.exec(statement_active).first()
-    if current_active:
+    if current_active := db.exec(statement_active).first():
         current_active.is_active = False
         db.add(current_active)
     restored_content = StoryContent(
@@ -218,7 +215,7 @@ def backup_content(
         StoryContent.project_id == project_id
     ).order_by(StoryContent.version.desc())
     versions = db.exec(statement_versions).all()
-    backup_data = {
+    return {
         "project": {
             "id": project.id,
             "title": project.title,
@@ -226,7 +223,7 @@ def backup_content(
             "genre": project.genre,
             "status": project.status,
             "created_at": project.created_at.isoformat(),
-            "word_count": project.word_count
+            "word_count": project.word_count,
         },
         "content_versions": [
             {
@@ -235,10 +232,9 @@ def backup_content(
                 "content_type": content.content_type,
                 "is_active": content.is_active,
                 "created_at": content.created_at.isoformat(),
-                "save_reason": content.save_reason
+                "save_reason": content.save_reason,
             }
             for content in versions
         ],
-        "backup_created_at": datetime.utcnow().isoformat()
+        "backup_created_at": datetime.now(timezone.utc).isoformat(),
     }
-    return backup_data

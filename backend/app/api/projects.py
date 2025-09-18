@@ -1,3 +1,5 @@
+# backend/app/api/projects.py
+from datetime import timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
@@ -26,13 +28,13 @@ def get_user_project(
     statement = select(Project).where(
         (Project.id == project_id) & (Project.user_id == current_user.id)
     )
-    project = db.exec(statement).first()
-    if not project:
+    if project := db.exec(statement).first():
+        return project
+    else:
         raise HTTPException(
             status_code=404,
             detail="Project not found or access denied"
         )
-    return project
 
 def update_word_count(project: Project, db: Session):
     statement = select(StoryContent).where(
@@ -42,7 +44,7 @@ def update_word_count(project: Project, db: Session):
     if active_content and active_content.content:
         word_count = len(active_content.content.split())
         project.word_count = word_count
-        project.last_edited_at = datetime.utcnow()
+        project.last_edited_at = datetime.now(timezone.utc)
         db.add(project)
         db.commit()
         db.refresh(project)
@@ -134,7 +136,7 @@ def update_project(
     for field, value in update_data.items():
         setattr(project, field, value)
 
-    project.updated_at = datetime.utcnow()
+    project.updated_at = datetime.now(timezone.utc)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -167,10 +169,20 @@ def get_project_stats(
         "project_id": project_id,
         "word_count": project.word_count,
         "target_word_count": project.target_word_count,
-        "character_count": len(active_content.content) if active_content and active_content.content else 0,
+        "character_count": (
+            len(active_content.content)
+            if active_content and active_content.content
+            else 0
+        ),
         "progress_percentage": 0,
-        "days_since_creation": (datetime.utcnow() - project.created_at).days,
-        "last_edited": project.last_edited_at.isoformat() if project.last_edited_at else None
+        "days_since_creation": (
+            datetime.now(timezone.utc) - project.created_at
+        ).days,
+        "last_edited": (
+            project.last_edited_at.isoformat()
+            if project.last_edited_at
+            else None
+        ),
     }
 
     if project.target_word_count and project.target_word_count > 0:
